@@ -1,0 +1,429 @@
+<script>
+(function () {
+  'use strict';
+
+  var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  var STATUS = {
+    'on-track': { cls: 'chip-good', ico: '✓', label: 'On track' },
+    'ahead': { cls: 'chip-warning', ico: '▲', label: 'Ahead of pace' },
+    'over': { cls: 'chip-critical', ico: '✕', label: 'Over budget' },
+    'no-budget': { cls: 'chip-none', ico: '–', label: 'No budget' }
+  };
+  var ERROR_TITLES = {
+    SHEET_ID_MISSING: 'Spreadsheet not configured',
+    SHEET_NOT_FOUND: 'Spreadsheet not found',
+    NO_PERMISSION: 'No permission',
+    TAB_NOT_FOUND: 'Tab not found',
+    INCOME_NOT_FOUND: 'Monthly income not found',
+    NETWORK: 'Could not reach the server',
+    UNEXPECTED: 'Something went wrong'
+  };
+
+  var state = { data: null, month: '', week: 'thisWeek', loading: false };
+  var $ = function (id) { return document.getElementById(id); };
+
+  // ---------------------------------------------------------------- helpers
+  function esc(s) {
+    return String(s === null || s === undefined ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function pen(n, decimals) {
+    decimals = decimals || 0;
+    var v = Number(n) || 0;
+    var fixed = Math.abs(v).toFixed(decimals);
+    var parts = fixed.split('.');
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return (v < 0 && Number(fixed) !== 0 ? '-' : '') + 'S/ ' + parts.join('.');
+  }
+  function penShort(n) {
+    if (n >= 1000) return 'S/ ' + (Math.round(n / 100) / 10).toString().replace(/\.0$/, '') + 'k';
+    return pen(n);
+  }
+  function shortDate(iso) { return MONTHS[+iso.slice(5, 7) - 1] + ' ' + (+iso.slice(8, 10)); }
+  function monthLabel(m) { return MONTHS[+m.slice(5, 7) - 1] + ' ' + m.slice(0, 4); }
+  function pct(x) { return Math.max(0, Math.min(100, x * 100)); }
+  function chip(status) {
+    var s = STATUS[status];
+    return '<span class="chip ' + s.cls + '"><span class="ico" aria-hidden="true">' + s.ico + '</span>' + s.label + '</span>';
+  }
+
+  // ---------------------------------------------------------------- server
+  function call(fn, args, onOk, onErr) {
+    var runner = google.script.run
+      .withSuccessHandler(function (res) {
+        if (res && res.ok) onOk(res.data);
+        else onErr((res && res.error) || { code: 'UNEXPECTED', message: 'Empty response from server.' });
+      })
+      .withFailureHandler(function (err) {
+        onErr({ code: 'NETWORK', message: (err && err.message) || String(err) });
+      });
+    runner[fn].apply(runner, args);
+  }
+
+  function load(forceRefresh) {
+    if (state.loading) return;
+    state.loading = true;
+    setBusy(true);
+    $('status').textContent = forceRefresh ? 'Refreshing data from the sheet…' : 'Loading…';
+    call('getDashboard', [state.month, !!forceRefresh], function (data) {
+      state.loading = false;
+      setBusy(false);
+      state.data = data;
+      state.month = data.month;
+      $('status').textContent = '';
+      $('error').hidden = true;
+      render();
+    }, function (err) {
+      state.loading = false;
+      setBusy(false);
+      $('status').textContent = '';
+      showError(err);
+    });
+  }
+
+  function setBusy(busy) {
+    $('refresh-btn').disabled = busy;
+    $('month-select').disabled = busy || !state.data;
+    $('refresh-btn').textContent = busy ? 'Loading…' : 'Refresh data';
+  }
+
+  function showError(err) {
+    var box = $('error');
+    var title = ERROR_TITLES[err.code] || ERROR_TITLES.UNEXPECTED;
+    var help = '';
+    if (err.code === 'SHEET_ID_MISSING') {
+      help = '<p>Set it in the Apps Script editor: <strong>Project Settings → Script Properties</strong>, key <code>SHEET_ID</code>.</p>';
+    }
+    box.innerHTML = '<h2>' + esc(title) + '</h2><p>' + esc(err.message) + '</p>' + help +
+      '<p><button type="button" class="btn" id="retry-btn">Try again</button></p>';
+    box.hidden = false;
+    $('retry-btn').addEventListener('click', function () { load(true); });
+    if (!state.data) $('dashboard').hidden = true;
+  }
+
+  // ---------------------------------------------------------------- render
+  function render() {
+    var d = state.data;
+    renderMonthSelect(d);
+    renderPace(d.summary);
+    renderWeekly();
+    renderCategories(d.breakdown, d.summary);
+    renderTrend(d.trend, d.summary.cap, d.month);
+    renderQuality(d.quality);
+    renderTransactions(d.transactions);
+    var t = new Date(d.loadedAt);
+    $('footer').textContent = 'Data loaded ' + t.toLocaleString('en-US', { timeZone: 'America/Lima', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) +
+      (d.fromCache ? ' (cached, refreshes every 5 min)' : ' (fresh)') + ' · Income ' + pen(d.summary.income) + ' · All amounts in PEN';
+    $('dashboard').hidden = false;
+  }
+
+  function renderMonthSelect(d) {
+    var sel = $('month-select');
+    sel.innerHTML = d.months.map(function (m) {
+      return '<option value="' + esc(m.value) + '"' + (m.value === d.month ? ' selected' : '') + '>' + esc(m.label) + '</option>';
+    }).join('');
+    sel.disabled = false;
+  }
+
+  function renderPace(s) {
+    var badge = $('pace-badge');
+    var html = '';
+    var cap = s.cap || 0;
+    var kpis = [
+      { label: s.closed ? 'Final total' : 'Spent so far', value: pen(s.spent), big: true },
+      { label: 'Monthly cap (' + s.capPct + '% of income)', value: pen(cap) }
+    ];
+    if (s.state === 'current') {
+      kpis.push({ label: 'Projected month-end', value: pen(s.projected) });
+      kpis.push({ label: s.remaining >= 0 ? 'Left this month' : 'Over cap by', value: pen(Math.abs(s.remaining)) });
+    } else if (s.closed) {
+      kpis.push({ label: s.remaining >= 0 ? 'Under cap by' : 'Over cap by', value: pen(Math.abs(s.remaining)) });
+    }
+    html += '<div class="kpis">' + kpis.map(function (k) {
+      return '<div><div class="kpi-label">' + esc(k.label) + '</div><div class="kpi-value' + (k.big ? '' : ' sm') + '">' + esc(k.value) + '</div></div>';
+    }).join('') + '</div>';
+
+    if (s.state === 'future') {
+      badge.innerHTML = '';
+      $('pace').innerHTML = html + '<p class="muted">This month has not started yet.</p>';
+      return;
+    }
+
+    var reference = s.state === 'current' ? s.projected : s.spent;
+    badge.innerHTML = s.overCap ? chip('over').replace('Over budget', s.closed ? 'Over cap' : 'Projected over cap')
+      : chip('on-track').replace('On track', s.closed ? 'Within cap' : 'On track for cap');
+
+    var max = Math.max(cap, s.spent, reference || 0) * 1.08 || 1;
+    var spentW = pct(s.spent / max);
+    var meter = '<div class="meter" role="img" aria-label="' + esc(
+      'Spent ' + pen(s.spent) + ' of ' + pen(cap) + ' cap' +
+      (s.state === 'current' ? ', day ' + s.daysElapsed + ' of ' + s.daysInMonth + ', projected ' + pen(s.projected) : '')) + '">';
+    if (s.state === 'current' && s.projected > s.spent) {
+      meter += '<div class="meter-proj" style="left:' + spentW + '%;width:' + (pct(s.projected / max) - spentW) + '%"></div>';
+    }
+    meter += '<div class="meter-fill' + (s.spent > cap ? ' over' : '') + '" style="width:' + spentW + '%"></div>';
+    if (cap) {
+      var capX = pct(cap / max);
+      meter += '<div class="meter-mark" style="left:' + capX + '%"></div>' +
+        '<div class="meter-mark-label top" style="left:' + capX + '%">Cap ' + esc(pen(cap)) + '</div>';
+      if (s.state === 'current') {
+        var dayX = pct(cap * s.dayFraction / max);
+        meter += '<div class="meter-mark" style="left:' + dayX + '%;opacity:.55"></div>' +
+          '<div class="meter-mark-label bottom" style="left:' + Math.max(6, Math.min(94, dayX)) + '%">Day ' + s.daysElapsed + '/' + s.daysInMonth + ' · pace ' + esc(pen(cap * s.dayFraction)) + '</div>';
+      }
+    }
+    meter += '</div>';
+    var legend = '<div class="legend"><span><span class="swatch" style="background:var(--series)"></span>Spent</span>';
+    if (s.state === 'current') {
+      legend += '<span><span class="swatch" style="background:var(--series-soft)"></span>Projected (' + (s.lumpSum ? 'rent + ' : '') + 'spent ÷ ' + s.daysElapsed + ' days × ' + s.daysInMonth + ')</span>' +
+        '<span><span class="swatch" style="background:var(--cap-line);opacity:.55;width:2px"></span>Today\'s pace on the cap</span>';
+    }
+    legend += '</div>';
+    $('pace').innerHTML = html + meter + legend;
+  }
+
+  function renderWeekly() {
+    var w = state.data.weekly[state.week];
+    document.querySelectorAll('.seg').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.getAttribute('data-week') === state.week));
+    });
+    $('weekly-range').textContent = 'Mon ' + shortDate(w.start) + ' – Sun ' + shortDate(w.end) + ' · weekly limit = monthly budget × 12 ÷ 52';
+    if (!w.rows.length) {
+      $('weekly').innerHTML = '<p class="muted">No watched categories. Choose some in Settings.</p>';
+      return;
+    }
+    $('weekly').innerHTML = '<ul class="rows">' + w.rows.map(function (r) {
+      var sub, status;
+      if (r.limit === null) {
+        sub = pen(r.spent) + ' spent · no budget in sheet';
+        status = chip('no-budget');
+      } else {
+        sub = pen(r.spent) + ' of ' + pen(r.limit);
+        status = r.over
+          ? '<span class="chip chip-critical"><span class="ico" aria-hidden="true">✕</span>' + esc(pen(-r.remaining)) + ' over</span>'
+          : '<span class="chip chip-good"><span class="ico" aria-hidden="true">✓</span>' + esc(pen(r.remaining)) + ' left</span>';
+      }
+      var bar = r.limit ? '<div class="bar" aria-hidden="true"><div class="bar-fill' + (r.over ? ' over' : '') + '" style="width:' + pct(r.spent / r.limit) + '%"></div></div>' : '';
+      return '<li><div class="row-top"><span class="row-name">' + esc(r.label) + '</span>' + status + '</div>' +
+        '<div class="row-sub num">' + esc(sub) + '</div>' + bar + '</li>';
+    }).join('') + '</ul>';
+  }
+
+  function renderCategories(rows, s) {
+    if (!rows.length) {
+      $('categories').innerHTML = '<p class="muted">No expenses recorded this month.</p>';
+      return;
+    }
+    var showTick = s.state === 'current';
+    $('categories').innerHTML = '<ul class="rows cat-grid">' + rows.map(function (c) {
+      var sub = c.budget ? pen(c.spent) + ' of ' + pen(c.budget) + ' · ' + Math.round(c.pct * 100) + '%' : pen(c.spent);
+      if (c.count) sub += ' · ' + c.count + (c.count === 1 ? ' expense' : ' expenses');
+      var bar = c.budget
+        ? '<div class="bar" aria-hidden="true"><div class="bar-fill' + (c.status === 'over' ? ' over' : '') + '" style="width:' + pct(c.pct) + '%"></div>' +
+          (showTick ? '<div class="bar-tick" style="left:' + pct(s.dayFraction) + '%"></div>' : '') + '</div>'
+        : '';
+      return '<li><div class="row-top"><span class="row-name">' + esc(c.label) + '</span>' + chip(c.status) + '</div>' +
+        '<div class="row-sub num">' + esc(sub) + '</div>' + bar + '</li>';
+    }).join('') + '</ul>' +
+      (showTick ? '<p class="muted small">The thin tick on each bar marks where spending would be at an even pace today.</p>' : '');
+  }
+
+  function renderTrend(points, cap, selected) {
+    var W = 480, H = 230, m = { t: 22, r: 12, b: 28, l: 52 };
+    var iw = W - m.l - m.r, ih = H - m.t - m.b;
+    var maxV = Math.max(cap || 0, Math.max.apply(null, points.map(function (p) { return p.total; }))) * 1.1 || 100;
+    var step = niceStep(maxV / 4);
+    maxV = Math.ceil(maxV / step) * step;
+    var y = function (v) { return m.t + ih - (v / maxV) * ih; };
+    var band = iw / points.length;
+    var bw = Math.min(44, band * 0.62);
+    var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-labelledby="trend-title trend-desc">' +
+      '<desc id="trend-desc">Monthly totals for the last six months with the cap of ' + esc(pen(cap)) + ' as a dashed reference line. Data table below.</desc>';
+    for (var v = 0; v <= maxV + 0.001; v += step) {
+      svg += '<line class="grid-line" x1="' + m.l + '" x2="' + (W - m.r) + '" y1="' + y(v) + '" y2="' + y(v) + '"/>' +
+        '<text class="axis-text" x="' + (m.l - 8) + '" y="' + (y(v) + 4) + '" text-anchor="end">' + esc(penShort(v)) + '</text>';
+    }
+    points.forEach(function (p, i) {
+      var cx = m.l + band * i + band / 2;
+      var x = cx - bw / 2, top = y(p.total), h = Math.max(0, m.t + ih - top);
+      var over = cap && p.total > cap;
+      var r = Math.min(4, h, bw / 2);
+      var path = h > 0
+        ? 'M' + x + ',' + (m.t + ih) + 'V' + (top + r) + 'Q' + x + ',' + top + ' ' + (x + r) + ',' + top +
+          'H' + (x + bw - r) + 'Q' + (x + bw) + ',' + top + ' ' + (x + bw) + ',' + (top + r) + 'V' + (m.t + ih) + 'Z'
+        : '';
+      var tip = monthLabel(p.month) + ': ' + pen(p.total) + (cap ? (over ? ' · over cap by ' + pen(p.total - cap) : ' · ' + pen(cap - p.total) + ' under cap') : '');
+      svg += '<g>' +
+        '<rect class="hit" x="' + (cx - band / 2) + '" y="' + m.t + '" width="' + band + '" height="' + ih + '" tabindex="0" role="button"' +
+        ' data-month="' + esc(p.month) + '" data-tip="' + esc(tip) + '" aria-label="' + esc(tip + '. Select to view this month.') + '"/>' +
+        (path ? '<path class="bar-mark' + (over ? ' over' : '') + (p.month === selected ? ' selected' : '') + '" d="' + path + '" pointer-events="none"/>' : '') +
+        (p.month === selected ? '<text class="val-text" x="' + cx + '" y="' + (top - 6) + '" text-anchor="middle">' + esc(penShort(p.total)) + '</text>' : '') +
+        '<text class="axis-text" x="' + cx + '" y="' + (H - 8) + '" text-anchor="middle"' + (p.month === selected ? ' font-weight="700"' : '') + '>' + esc(p.label) + '</text>' +
+        '</g>';
+    });
+    if (cap) {
+      svg += '<line class="cap-line" x1="' + m.l + '" x2="' + (W - m.r) + '" y1="' + y(cap) + '" y2="' + y(cap) + '" pointer-events="none"/>' +
+        '<text class="cap-text" x="' + (W - m.r) + '" y="' + (y(cap) - 6) + '" text-anchor="end">Cap ' + esc(penShort(cap)) + '</text>';
+    }
+    svg += '</svg>';
+    var table = '<details class="table-toggle"><summary>Show as table</summary><div class="table-wrap"><table><thead><tr><th scope="col">Month</th><th scope="col" class="amt">Total</th><th scope="col" class="amt">vs. cap</th></tr></thead><tbody>' +
+      points.map(function (p) {
+        return '<tr><td>' + esc(monthLabel(p.month)) + '</td><td class="amt num">' + esc(pen(p.total)) + '</td><td class="amt num">' +
+          (cap ? esc((p.total > cap ? '+' : '') + pen(p.total - cap)) : '–') + '</td></tr>';
+      }).join('') + '</tbody></table></div></details>';
+    $('trend').innerHTML = svg + '<div class="legend"><span><span class="swatch" style="background:var(--series)"></span>Within cap</span>' +
+      '<span><span class="swatch" style="background:var(--critical)"></span>Over cap</span><span>Select a bar to open that month</span></div>' + table;
+
+    $('trend').querySelectorAll('.hit').forEach(function (el) {
+      el.addEventListener('mouseenter', showTip);
+      el.addEventListener('mousemove', showTip);
+      el.addEventListener('mouseleave', hideTip);
+      el.addEventListener('focus', showTip);
+      el.addEventListener('blur', hideTip);
+      el.addEventListener('click', function () { selectMonth(el.getAttribute('data-month')); });
+      el.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectMonth(el.getAttribute('data-month')); }
+      });
+    });
+  }
+
+  function niceStep(raw) {
+    var p = Math.pow(10, Math.floor(Math.log10(raw || 1)));
+    var n = raw / p;
+    return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p;
+  }
+
+  function showTip(e) {
+    var tip = $('tooltip');
+    var el = e.currentTarget;
+    tip.textContent = el.getAttribute('data-tip');
+    tip.hidden = false;
+    var x, y;
+    if (e.type === 'focus') {
+      var r = el.getBoundingClientRect();
+      x = r.left + r.width / 2; y = r.top;
+    } else {
+      x = e.clientX; y = e.clientY;
+    }
+    var w = tip.offsetWidth, h = tip.offsetHeight;
+    tip.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, x - w / 2)) + 'px';
+    tip.style.top = Math.max(8, y - h - 12) + 'px';
+  }
+  function hideTip() { $('tooltip').hidden = true; }
+
+  function renderQuality(q) {
+    var items = [];
+    var rentMissing = q.missingRent.filter(function (r) { return r.status === 'missing'; });
+    var rentPending = q.missingRent.filter(function (r) { return r.status === 'pending'; });
+    items.push(dqItem('Rent not recorded (≥ S/ 1,000)',
+      rentMissing.length ? statusText('critical', rentMissing.length + (rentMissing.length === 1 ? ' month' : ' months'))
+        : statusText('good', 'None missing'),
+      (rentMissing.length ? '<ul class="items">' + rentMissing.map(function (r) { return '<li>' + esc(monthLabel(r.month)) + '</li>'; }).join('') + '</ul>' : '') +
+      (rentPending.length ? '<p class="muted small">' + esc(monthLabel(rentPending[0].month)) + ': not recorded yet.</p>' : ''), true));
+
+    items.push(dqItem('Invalid amounts (excluded from totals)',
+      q.invalidAmounts.length ? statusText('critical', q.invalidAmounts.length + ' rows') : statusText('good', 'None'),
+      q.invalidAmounts.length ? '<details><summary>Show rows</summary><ul class="items">' + q.invalidAmounts.map(function (r) {
+        return '<li>Row ' + r.row + ': “' + esc(r.rawAmount) + '”' + (r.category ? ' · ' + esc(r.category) : '') +
+          (r.date ? ' · ' + esc(shortDate(r.date)) : '') + ' — ' + esc(r.reason) + '</li>';
+      }).join('') + '</ul></details>' : ''));
+
+    var v = q.vagueNotes;
+    items.push(dqItem('Vague or empty notes (this month)',
+      v.count ? statusText('warning', v.count + ' · ' + pen(v.total)) : statusText('good', 'None'),
+      v.count ? '<details><summary>Show expenses</summary><ul class="items">' + v.items.map(function (r) {
+        return '<li>' + esc(shortDate(r.date)) + ' · ' + esc(r.label) + ' · ' + esc(pen(r.amount, 2)) + ' · ' +
+          (r.note ? '“' + esc(r.note) + '”' : '<span class="empty-note">empty</span>') + ' (row ' + r.row + ')</li>';
+      }).join('') + '</ul></details>' : ''));
+
+    items.push(dqItem('Spending without a budget (this month)',
+      q.unbudgeted.length ? statusText('warning', q.unbudgeted.length + (q.unbudgeted.length === 1 ? ' category' : ' categories')) : statusText('good', 'None'),
+      q.unbudgeted.length ? '<ul class="items">' + q.unbudgeted.map(function (c) {
+        return '<li>' + esc(c.label) + ' · ' + esc(pen(c.spent)) + '</li>';
+      }).join('') + '</ul>' : ''));
+
+    $('quality').innerHTML = '<ul class="dq">' + items.join('') + '</ul>';
+  }
+
+  function statusText(kind, text) {
+    var map = { good: ['chip-good', '✓'], warning: ['chip-warning', '!'], critical: ['chip-critical', '✕'] };
+    return '<span class="chip ' + map[kind][0] + '"><span class="ico" aria-hidden="true">' + map[kind][1] + '</span>' + esc(text) + '</span>';
+  }
+  function dqItem(title, status, body) {
+    return '<li><div class="dq-head"><span class="row-name">' + esc(title) + '</span>' + status + '</div>' + (body || '') + '</li>';
+  }
+
+  function renderTransactions(rows) {
+    if (!rows.length) {
+      $('transactions').innerHTML = '<p class="muted">No transactions this month.</p>';
+      return;
+    }
+    $('transactions').innerHTML = '<table><thead><tr><th scope="col">Date</th><th scope="col">Note</th><th scope="col">Category</th>' +
+      '<th scope="col">Account</th><th scope="col" class="amt">Amount</th></tr></thead><tbody>' +
+      rows.map(function (t) {
+        return '<tr><td class="num">' + esc(shortDate(t.date)) + '</td><td class="note">' +
+          (t.note ? esc(t.note) : '<span class="empty-note">no note</span>') + '</td><td>' + esc(t.label) + '</td><td>' +
+          esc(t.account) + '</td><td class="amt num">' + esc(pen(t.amount, 2)) + '</td></tr>';
+      }).join('') + '</tbody></table>';
+  }
+
+  // ---------------------------------------------------------------- settings
+  function openSettings() {
+    if (!state.data) return;
+    var s = state.data.settings;
+    $('watched-list').innerHTML = state.data.categories.map(function (c, i) {
+      var id = 'w-' + i;
+      return '<label for="' + id + '"><input type="checkbox" id="' + id + '" value="' + esc(c.key) + '"' +
+        (s.watched.indexOf(c.key) >= 0 ? ' checked' : '') + '>' + esc(c.label) + '</label>';
+    }).join('');
+    $('cap-input').value = s.capPct;
+    $('settings-error').hidden = true;
+    $('settings-dialog').showModal();
+  }
+
+  function saveSettingsFromForm(e) {
+    e.preventDefault();
+    var cap = Number($('cap-input').value);
+    if (!(cap > 0 && cap <= 100)) {
+      $('settings-error').textContent = 'Cap percentage must be between 1 and 100.';
+      $('settings-error').hidden = false;
+      $('cap-input').focus();
+      return;
+    }
+    var watched = Array.prototype.map.call(
+      $('watched-list').querySelectorAll('input:checked'), function (i) { return i.value; });
+    $('settings-save').disabled = true;
+    call('saveSettings', [{ watched: watched, capPct: cap }], function () {
+      $('settings-save').disabled = false;
+      $('settings-dialog').close();
+      load(false);
+    }, function (err) {
+      $('settings-save').disabled = false;
+      $('settings-error').textContent = 'Could not save settings: ' + err.message;
+      $('settings-error').hidden = false;
+    });
+  }
+
+  // ---------------------------------------------------------------- events
+  function selectMonth(m) {
+    if (!m || m === state.month) return;
+    state.month = m;
+    load(false);
+  }
+
+  $('month-select').addEventListener('change', function (e) { selectMonth(e.target.value); });
+  $('refresh-btn').addEventListener('click', function () { load(true); });
+  $('settings-btn').addEventListener('click', openSettings);
+  $('settings-cancel').addEventListener('click', function () { $('settings-dialog').close(); });
+  $('settings-form').addEventListener('submit', saveSettingsFromForm);
+  document.querySelectorAll('.seg').forEach(function (b) {
+    b.addEventListener('click', function () {
+      state.week = b.getAttribute('data-week');
+      if (state.data) renderWeekly();
+    });
+  });
+
+  load(false);
+})();
+</script>
