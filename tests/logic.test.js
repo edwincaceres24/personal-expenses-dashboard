@@ -311,7 +311,9 @@ describe('data quality', () => {
   });
   test('invalid amounts listed with row number', () => {
     expect(q.invalidAmounts).toHaveLength(1);
-    expect(q.invalidAmounts[0]).toMatchObject({ row: 8, rawAmount: 'Food' });
+    expect(q.invalidAmounts[0]).toMatchObject({ row: 8, rawAmount: 'Food', label: 'Food' });
+    const deuda = L.dataQuality(L.parseExpenses([HEADER, row('x', 'Deuda', 'Cash', '', '09-01-2026')]), {}, '2026-09', '2026-10-01');
+    expect(deuda.invalidAmounts[0].label).toBe('Debt');
   });
   test('vague notes count and total for selected month', () => {
     const sep = L.dataQuality(parsed, budgets, '2026-09', '2026-10-01', 6);

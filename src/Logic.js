@@ -515,7 +515,12 @@ function dataQuality(parsed, budgets, month, today, n) {
 
   return {
     missingRent: missingRent,
-    invalidAmounts: parsed.invalid.slice(),
+    invalidAmounts: parsed.invalid.map(function (e) {
+      var copy = {};
+      for (var k in e) copy[k] = e[k];
+      copy.label = e.category ? displayCategory(e.category) : '';
+      return copy;
+    }),
     vagueNotes: {
       count: vague.length,
       total: sum(vague),

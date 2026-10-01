@@ -341,7 +341,7 @@
     items.push(dqItem('Invalid amounts (excluded from totals)',
       q.invalidAmounts.length ? statusText('critical', q.invalidAmounts.length + ' rows') : statusText('good', 'None'),
       q.invalidAmounts.length ? '<details><summary>Show rows</summary><ul class="items">' + q.invalidAmounts.map(function (r) {
-        return '<li>Row ' + r.row + ': “' + esc(r.rawAmount) + '”' + (r.category ? ' · ' + esc(r.category) : '') +
+        return '<li>Row ' + r.row + ': “' + esc(r.rawAmount) + '”' + (r.label ? ' · ' + esc(r.label) : '') +
           (r.date ? ' · ' + esc(shortDate(r.date)) : '') + ' — ' + esc(r.reason) + '</li>';
       }).join('') + '</ul></details>' : ''));
 
