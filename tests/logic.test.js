@@ -154,6 +154,12 @@ describe('monthSummary', () => {
     expect(s.overCap).toBe(true);
     expect(s.remaining).toBe(1200);
   });
+  test('rent is not extrapolated in the projection', () => {
+    const withRent = expenses.concat(L.parseExpenses([HEADER, row(1800, 'Rent', 'VISA', 'Alquiler', '09-01-2026')]).expenses);
+    const s = L.monthSummary(withRent, '2026-09', '2026-09-10', 4000, 55);
+    expect(s.lumpSum).toBe(1800);
+    expect(s.projected).toBe(4800); // 1800 + 1000 / 10 * 30
+  });
   test('closed month shows final result, no projection', () => {
     const s = L.monthSummary(expenses, '2026-08', '2026-09-10', 4000, 55);
     expect(s.closed).toBe(true);
@@ -191,6 +197,11 @@ describe('categoryBreakdown', () => {
   });
   test('closed months never report ahead of pace', () => {
     expect(L.categoryStatus(90, 100, 1, true)).toBe('on-track');
+  });
+  test('rent (lump sum) is never ahead of pace, but can be over', () => {
+    const rent = L.parseExpenses([HEADER, row(1800, 'Rent', 'VISA', 'Alquiler', '09-01-2026')]).expenses;
+    expect(L.categoryBreakdown(rent, '2026-09', { Rent: 1900 }, '2026-09-02')[0].status).toBe('on-track');
+    expect(L.categoryBreakdown(rent, '2026-09', { Rent: 1500 }, '2026-09-02')[0].status).toBe('over');
   });
   test('uses display labels', () => {
     expect(L.categoryBreakdown([{ category: 'Laisure', amount: 1, month: '2026-09', date: '2026-09-01' }], '2026-09', {}, '2026-09-02')[0].label).toBe('Leisure');
@@ -326,5 +337,13 @@ describe('buildDashboard', () => {
     expect(d.weekly.thisWeek.rows.find(r => r.key === 'Restaurant')).toMatchObject({ spent: 100, limit: 120 });
     expect(d.trend).toHaveLength(6);
     expect(d.categories.find(c => c.key === 'Laisure').label).toBe('Leisure');
+  });
+  test('selected month without data still appears in the month list', () => {
+    const d = L.buildDashboard(
+      { expenses: [], invalid: [], budgets: {}, income: 5000 },
+      { month: '2026-05', today: '2026-10-01', settings: null }
+    );
+    expect(d.months.map(m => m.value)).toEqual(['2026-10', '2026-05']);
+    expect(d.summary.closed).toBe(true);
   });
 });

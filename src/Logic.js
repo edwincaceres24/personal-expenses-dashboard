@@ -27,6 +27,9 @@ var DEFAULT_SETTINGS = {
 
 var RENT_CATEGORY = 'Rent';
 var RENT_MIN_AMOUNT = 1000;
+// Paid once per month: counted as-is in projections (not extrapolated) and
+// never flagged "ahead of pace".
+var LUMP_SUM_CATEGORIES = ['Rent'];
 var PACE_TOLERANCE = 0.10;
 var MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -304,16 +307,25 @@ function availableMonths(expenses, today) {
   return Object.keys(seen).sort().reverse();
 }
 
-/** Spent vs. cap for a month, with projection for the current month. */
+function isLumpSum(category) {
+  return LUMP_SUM_CATEGORIES.indexOf(category) >= 0;
+}
+
+/**
+ * Spent vs. cap for a month. For the current month the projection is
+ * lump sums (rent) + variable spend ÷ days elapsed × days in month.
+ */
 function monthSummary(expenses, month, today, income, capPct) {
   var state = monthState(month, today);
   var dim = daysInMonthKey(month);
-  var spent = sum(inMonth(expenses, month));
+  var items = inMonth(expenses, month);
+  var spent = sum(items);
+  var lumpSum = sum(items.filter(function (e) { return isLumpSum(e.category); }));
   var cap = income !== null && income !== undefined ? Math.round(income * capPct) / 100 : null;
   var daysElapsed = state === 'past' ? dim : state === 'future' ? 0 : +today.slice(8, 10);
   var projected = null;
   if (state === 'current' && daysElapsed > 0) {
-    projected = Math.round(spent / daysElapsed * dim * 100) / 100;
+    projected = Math.round((lumpSum + (spent - lumpSum) / daysElapsed * dim) * 100) / 100;
   }
   var reference = state === 'past' ? spent : projected;
   return {
@@ -321,6 +333,7 @@ function monthSummary(expenses, month, today, income, capPct) {
     state: state,
     closed: state === 'past',
     spent: spent,
+    lumpSum: lumpSum,
     cap: cap,
     capPct: capPct,
     income: income,
@@ -334,10 +347,10 @@ function monthSummary(expenses, month, today, income, capPct) {
 }
 
 /** Status of a category's spend vs. its budget. */
-function categoryStatus(spent, budget, fraction, closed) {
+function categoryStatus(spent, budget, fraction, closed, lumpSum) {
   if (!budget) return 'no-budget';
   if (spent > budget) return 'over';
-  if (!closed && spent > budget * fraction * (1 + PACE_TOLERANCE)) return 'ahead';
+  if (!closed && !lumpSum && spent > budget * fraction * (1 + PACE_TOLERANCE)) return 'ahead';
   return 'on-track';
 }
 
@@ -364,7 +377,7 @@ function categoryBreakdown(expenses, month, budgets, today) {
       count: counts[k] || 0,
       budget: budget,
       pct: budget ? spent / budget : null,
-      status: categoryStatus(spent, budget, fraction, closed)
+      status: categoryStatus(spent, budget, fraction, closed, isLumpSum(k))
     };
   }).sort(function (a, b) {
     return b.spent - a.spent || a.label.localeCompare(b.label);
@@ -541,7 +554,7 @@ function buildDashboard(data, opts) {
     month: month,
     monthLabel: formatMonth(month),
     today: today,
-    months: availableMonths(data.expenses, today).map(function (m) {
+    months: availableMonths(data.expenses.concat([{ month: month }]), today).map(function (m) {
       return { value: m, label: formatMonth(m) };
     }),
     settings: settings,
