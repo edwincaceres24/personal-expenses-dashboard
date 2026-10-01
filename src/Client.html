@@ -168,11 +168,11 @@
     if (cap) {
       var capX = pct(cap / max);
       meter += '<div class="meter-mark" style="left:' + capX + '%"></div>' +
-        '<div class="meter-mark-label top" style="left:' + capX + '%">Cap ' + esc(pen(cap)) + '</div>';
+        '<div class="meter-mark-label top" data-x="' + capX + '" style="left:' + capX + '%">Cap ' + esc(pen(cap)) + '</div>';
       if (s.state === 'current') {
         var dayX = pct(cap * s.dayFraction / max);
         meter += '<div class="meter-mark" style="left:' + dayX + '%;opacity:.55"></div>' +
-          '<div class="meter-mark-label bottom" style="left:' + Math.max(6, Math.min(94, dayX)) + '%">Day ' + s.daysElapsed + '/' + s.daysInMonth + ' · pace ' + esc(pen(cap * s.dayFraction)) + '</div>';
+          '<div class="meter-mark-label bottom" data-x="' + dayX + '" style="left:' + dayX + '%">Day ' + s.daysElapsed + '/' + s.daysInMonth + ' · pace ' + esc(pen(cap * s.dayFraction)) + '</div>';
       }
     }
     meter += '</div>';
@@ -183,6 +183,20 @@
     }
     legend += '</div>';
     $('pace').innerHTML = html + meter + legend;
+    positionMeterLabels();
+  }
+
+  /** Centers each marker label on its marker, clamped inside the meter's width. */
+  function positionMeterLabels() {
+    document.querySelectorAll('#pace .meter').forEach(function (meter) {
+      var mw = meter.clientWidth;
+      meter.querySelectorAll('.meter-mark-label').forEach(function (label) {
+        var w = label.offsetWidth;
+        var center = mw * Number(label.getAttribute('data-x')) / 100;
+        label.style.left = Math.max(0, Math.min(mw - w, center - w / 2)) + 'px';
+        label.classList.add('placed');
+      });
+    });
   }
 
   function renderWeekly() {
@@ -424,6 +438,12 @@
       state.week = b.getAttribute('data-week');
       if (state.data) renderWeekly();
     });
+  });
+
+  var resizeFrame = 0;
+  window.addEventListener('resize', function () {
+    cancelAnimationFrame(resizeFrame);
+    resizeFrame = requestAnimationFrame(positionMeterLabels);
   });
 
   load(false);
