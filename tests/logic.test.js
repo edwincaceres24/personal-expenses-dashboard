@@ -23,6 +23,13 @@ describe('parseDate', () => {
     expect(L.parseDate('')).toBeNull();
     expect(L.parseDate(null)).toBeNull();
   });
+  test('parses Sheets serial numbers (date cells read via the Sheets API)', () => {
+    expect(L.parseDate(46292)).toBe('2026-09-27');
+    expect(L.parseDate(46292.9999)).toBe('2026-09-27'); // timestamp late in the day
+    expect(L.parseDate(46022)).toBe('2025-12-31');
+    expect(L.parseDate(0)).toBeNull();
+    expect(L.parseDate(NaN)).toBeNull();
+  });
   test('handles leap years', () => {
     expect(L.parseDate('02-29-2028')).toBe('2028-02-29');
     expect(L.parseDate('02-29-2026')).toBeNull();
@@ -78,6 +85,14 @@ describe('parseExpenses', () => {
   test('rows without any valid date are invalid, blank rows ignored', () => {
     expect(parsed.invalid.map(i => i.row)).toEqual([3, 7]);
     expect(parsed.expenses).toHaveLength(3);
+  });
+  test('accepts serial dates and short rows from the Sheets API', () => {
+    const p = L.parseExpenses([HEADER, [46292.5, 20, 'Food', 'Cash'], [46292.5, 15, 'Food', 'Cash', 'Pan', 46290], []]);
+    expect(p.expenses.map(e => [e.date, e.note, e.dateSource])).toEqual([
+      ['2026-09-25', 'Pan', 'date'],
+      ['2026-09-27', '', 'timestamp']
+    ]);
+    expect(p.invalid).toEqual([]);
   });
   test('handles empty input', () => {
     expect(L.parseExpenses([])).toEqual({ expenses: [], invalid: [] });

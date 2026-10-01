@@ -23,7 +23,7 @@ All amounts are in Peruvian soles (PEN). The UI is in English, and the time zone
 
 ```
 src/
-  appsscript.json   Manifest (V8, America/Lima, read-only Sheets scope, web app config)
+  appsscript.json   Manifest (V8, America/Lima, read-only Sheets scope, Sheets API service, web app config)
   Code.js           doGet, server endpoints, sheet access, cache
   Logic.js          Pure business logic (no Apps Script globals), unit tested with Jest
   Index.html        Layout
@@ -32,6 +32,20 @@ src/
 tests/logic.test.js Jest tests for Logic.js
 scripts/deploy.js   Helper used by `npm run deploy`
 ```
+
+## How the sheet is read
+
+The sheet is read with the **Google Sheets API advanced service** (`Sheets`), using
+one `values.batchGet` call that covers all three tabs. The only OAuth scope is
+`spreadsheets.readonly`.
+
+`SpreadsheetApp.openById()` isn't used because it requires the full read/write
+`spreadsheets` scope. With only the read-only scope, it fails with "You do not have
+permission to call SpreadsheetApp.openById".
+
+The advanced service is declared in `appsscript.json`. If you see "Google Sheets API
+service not enabled", open the editor, click **Services (+)** and add
+**Google Sheets API v4**.
 
 ## Spreadsheet expectations
 

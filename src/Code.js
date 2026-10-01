@@ -11,7 +11,7 @@ var TABS = {
   budgets: 'Budgets',
   framework: 'Financial Framework'
 };
-var CACHE_KEY = 'parsed-data-v1';
+var CACHE_KEY = 'parsed-data-v2';
 var CACHE_TTL_SECONDS = 300;
 var CACHE_CHUNK_SIZE = 90000; // CacheService values are limited to 100 KB
 
@@ -110,54 +110,91 @@ function loadData_(forceRefresh) {
   return fresh;
 }
 
-function openSpreadsheet_() {
+function getSheetId_() {
   var id = PropertiesService.getScriptProperties().getProperty(SHEET_ID_PROPERTY);
-  if (!id || !String(id).trim()) {
+  id = id ? String(id).trim() : '';
+  if (!id) {
     throw new AppError_('SHEET_ID_MISSING',
       'The SHEET_ID script property is not set. In the Apps Script editor open ' +
       'Project Settings → Script Properties and add SHEET_ID with your spreadsheet ID.');
   }
-  try {
-    return SpreadsheetApp.openById(String(id).trim());
-  } catch (e) {
-    var msg = String(e && e.message ? e.message : e);
-    if (/permission|access denied|not have access/i.test(msg)) {
-      throw new AppError_('NO_PERMISSION',
-        'No permission to open the spreadsheet set in SHEET_ID. Make sure the account ' +
-        'that deployed the web app can view it.');
-    }
-    throw new AppError_('SHEET_NOT_FOUND',
-      'Could not open the spreadsheet set in SHEET_ID. Check that the ID is correct. (' + msg + ')');
-  }
+  // Accept a full spreadsheet URL by mistake and extract the ID from it.
+  var m = id.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  return m ? m[1] : id;
 }
 
-function getTabValues_(ss, name) {
-  var sheet = ss.getSheetByName(name);
-  if (!sheet) {
-    throw new AppError_('TAB_NOT_FOUND', 'Tab "' + name + '" was not found in the spreadsheet.');
+/** Maps a Sheets API failure to a specific, readable error (keeping the raw text). */
+function sheetsError_(e, id) {
+  var msg = String(e && e.message ? e.message : e);
+  if (typeof Sheets === 'undefined' || /Sheets is not defined/.test(msg)) {
+    return new AppError_('SHEETS_API_DISABLED',
+      'The Google Sheets API advanced service is not enabled for this script. In the Apps Script ' +
+      'editor click Services (+), add "Google Sheets API" (v4), then reload. (' + msg + ')');
   }
-  var values = sheet.getDataRange().getValues();
-  var tz = ss.getSpreadsheetTimeZone();
-  return values.map(function (row) {
-    return row.map(function (cell) {
-      return cell instanceof Date ? Utilities.formatDate(cell, tz, 'yyyy-MM-dd') : cell;
-    });
-  });
+  if (/not found|404/i.test(msg)) {
+    return new AppError_('SHEET_NOT_FOUND',
+      'Spreadsheet "' + id + '" (SHEET_ID) was not found. Check that the ID is correct. (' + msg + ')');
+  }
+  if (/permission|403|access/i.test(msg)) {
+    return new AppError_('NO_PERMISSION',
+      'No permission to read spreadsheet "' + id + '" (SHEET_ID). Make sure the account that deployed ' +
+      'the web app can view it, then open the web app again to re-authorize. (' + msg + ')');
+  }
+  return new AppError_('SHEET_READ_FAILED', 'Could not read the spreadsheet. (' + msg + ')');
 }
 
+/**
+ * Reads the three tabs with one Sheets API batchGet call (read-only scope).
+ * Values come unformatted: numbers stay numbers and date cells are serial
+ * numbers, which Logic.parseDate converts without locale ambiguity.
+ */
 function readSheet_() {
-  var ss = openSpreadsheet_();
-  var parsed = parseExpenses(getTabValues_(ss, TABS.expenses).map(function (r) {
-    return r.slice(0, 8);
-  }));
-  var budgets = parseBudgets(getTabValues_(ss, TABS.budgets));
-  var income = findIncome(getTabValues_(ss, TABS.framework));
+  var id = getSheetId_();
+  var titles;
+  try {
+    var meta = Sheets.Spreadsheets.get(id, { fields: 'sheets.properties.title' });
+    titles = (meta.sheets || []).map(function (sh) { return sh.properties.title; });
+  } catch (e) {
+    throw sheetsError_(e, id);
+  }
+  [TABS.expenses, TABS.budgets, TABS.framework].forEach(function (name) {
+    if (titles.indexOf(name) < 0) {
+      throw new AppError_('TAB_NOT_FOUND',
+        'Tab "' + name + '" was not found in the spreadsheet. Tabs found: ' + titles.join(', ') + '.');
+    }
+  });
+
+  var ranges = [
+    quoteTab_(TABS.expenses) + '!A:H',
+    quoteTab_(TABS.budgets) + '!A:B',
+    quoteTab_(TABS.framework) + '!A:H'
+  ];
+  var res;
+  try {
+    res = Sheets.Spreadsheets.Values.batchGet(id, {
+      ranges: ranges,
+      valueRenderOption: 'UNFORMATTED_VALUE',
+      dateTimeRenderOption: 'SERIAL_NUMBER'
+    });
+  } catch (e) {
+    throw sheetsError_(e, id);
+  }
+  var vr = res.valueRanges || [];
+  var values = function (i) { return (vr[i] && vr[i].values) || []; };
+
+  var parsed = parseExpenses(values(0));
+  var budgets = parseBudgets(values(1));
+  var income = findIncome(values(2));
   if (income === null) {
     throw new AppError_('INCOME_NOT_FOUND',
       'Could not find a numeric "Mothly Income" value (label in column G, value in column H) ' +
       'in the "' + TABS.framework + '" tab.');
   }
   return { expenses: parsed.expenses, invalid: parsed.invalid, budgets: budgets, income: income };
+}
+
+function quoteTab_(name) {
+  return "'" + name.replace(/'/g, "''") + "'";
 }
 
 /** Stores JSON split across several keys to stay under the 100 KB value limit. */

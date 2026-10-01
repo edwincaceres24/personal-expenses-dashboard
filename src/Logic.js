@@ -57,11 +57,23 @@ function daysInMonth(y, m) {
 }
 
 /**
+ * Converts a Sheets serial date (days since 1899-12-30, as returned by the
+ * Sheets API with dateTimeRenderOption SERIAL_NUMBER) to 'YYYY-MM-DD'.
+ * The serial already reflects the spreadsheet's local date, so no time zone math.
+ */
+function serialToISO(serial) {
+  if (typeof serial !== 'number' || !isFinite(serial) || serial < 1 || serial > 100000) return null;
+  return utcToISO(Date.UTC(1899, 11, 30) + Math.floor(serial) * 86400000);
+}
+
+/**
  * Parses the date formats found in the sheet into 'YYYY-MM-DD', or null.
- * Accepts 'YYYY-MM-DD', 'MM-DD-YYYY', 'M/D/YYYY' and 'M/D/YYYY H:MM:SS'.
+ * Accepts Sheets serial numbers, 'YYYY-MM-DD', 'MM-DD-YYYY', 'M/D/YYYY'
+ * and 'M/D/YYYY H:MM:SS'.
  */
 function parseDate(value) {
   if (value === null || value === undefined) return null;
+  if (typeof value === 'number') return serialToISO(value);
   var s = String(value).trim();
   if (!s) return null;
   var m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
@@ -579,6 +591,7 @@ if (typeof module !== 'undefined' && module.exports) {
     KNOWN_CATEGORIES: KNOWN_CATEGORIES,
     DEFAULT_SETTINGS: DEFAULT_SETTINGS,
     daysInMonth: daysInMonth,
+    serialToISO: serialToISO,
     parseDate: parseDate,
     addDays: addDays,
     addMonths: addMonths,
