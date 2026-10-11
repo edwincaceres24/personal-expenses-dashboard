@@ -232,17 +232,33 @@
       return;
     }
     var showTick = s.state === 'current';
-    $('categories').innerHTML = '<ul class="rows cat-grid">' + rows.map(function (c) {
+    $('categories').innerHTML = '<ul class="rows cat-grid">' + rows.map(function (c, i) {
       var sub = c.budget ? pen(c.spent) + ' of ' + pen(c.budget) + ' · ' + Math.round(c.pct * 100) + '%' : pen(c.spent);
       if (c.count) sub += ' · ' + c.count + (c.count === 1 ? ' expense' : ' expenses');
       var bar = c.budget
         ? '<div class="bar" aria-hidden="true"><div class="bar-fill' + (c.status === 'over' ? ' over' : '') + '" style="width:' + pct(c.pct) + '%"></div>' +
           (showTick ? '<div class="bar-tick" style="left:' + pct(s.dayFraction) + '%"></div>' : '') + '</div>'
         : '';
-      return '<li><div class="row-top"><span class="row-name">' + esc(c.label) + '</span>' + chip(c.status) + '</div>' +
+      return '<li class="cat-item" tabindex="0" role="button" data-idx="' + i + '" aria-haspopup="dialog" aria-label="' +
+        esc(c.label + ': show expenses') + '"><div class="row-top"><span class="row-name">' + esc(c.label) + '</span>' + chip(c.status) + '</div>' +
         '<div class="row-sub num">' + esc(sub) + '</div>' + bar + '</li>';
     }).join('') + '</ul>' +
       (showTick ? '<p class="muted small">The thin tick on each bar marks where spending would be at an even pace today.</p>' : '');
+  }
+
+  function openCategory(c) {
+    $('category-title').textContent = c.label + ' · ' + state.data.monthLabel;
+    $('category-body').innerHTML = !c.expenses.length
+      ? '<p class="muted">No expenses in this category this month.</p>'
+      : '<div class="table-wrap"><table><thead><tr><th scope="col">Date</th><th scope="col">Note</th>' +
+        '<th scope="col">Account</th><th scope="col" class="amt">Amount</th></tr></thead><tbody>' +
+        c.expenses.map(function (t) {
+          return '<tr><td class="num">' + esc(shortDate(t.date)) + '</td><td class="note">' +
+            (t.note ? esc(t.note) : '<span class="empty-note">no note</span>') + '</td><td>' +
+            esc(t.account) + '</td><td class="amt num">' + esc(pen(t.amount, 2)) + '</td></tr>';
+        }).join('') + '</tbody></table></div>' +
+        '<p class="muted small num">' + c.count + (c.count === 1 ? ' expense' : ' expenses') + ' · total ' + esc(pen(c.spent, 2)) + '</p>';
+    $('category-dialog').showModal();
   }
 
   function renderTrend(points, cap, selected) {
@@ -431,6 +447,21 @@
   $('month-select').addEventListener('change', function (e) { selectMonth(e.target.value); });
   $('refresh-btn').addEventListener('click', function () { load(true); });
   $('settings-btn').addEventListener('click', openSettings);
+  $('categories').addEventListener('click', function (e) {
+    var li = e.target.closest('.cat-item');
+    if (li && state.data) openCategory(state.data.breakdown[Number(li.getAttribute('data-idx'))]);
+  });
+  $('categories').addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    var li = e.target.closest('.cat-item');
+    if (!li || !state.data) return;
+    e.preventDefault();
+    openCategory(state.data.breakdown[Number(li.getAttribute('data-idx'))]);
+  });
+  $('category-close').addEventListener('click', function () { $('category-dialog').close(); });
+  $('category-dialog').addEventListener('click', function (e) {
+    if (e.target === this) this.close();
+  });
   $('settings-cancel').addEventListener('click', function () { $('settings-dialog').close(); });
   $('settings-form').addEventListener('submit', saveSettingsFromForm);
   document.querySelectorAll('.seg').forEach(function (b) {

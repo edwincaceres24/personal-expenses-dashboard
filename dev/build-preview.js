@@ -87,7 +87,8 @@ ${read('Logic.js')}
 }
 
 function buildPreviewHtml(opts) {
-  opts = Object.assign({ today: limaToday(), scenario: 'ok', delay: 0 }, opts);
+  opts = Object.assign({ scenario: 'ok', delay: 0 }, opts);
+  if (!opts.today) opts.today = limaToday();
   const html = read('Index.html').replace(/<\?!=\s*include\('([^']+)'\);?\s*\?>/g, (_, name) =>
     (name === 'Client' ? stubScript(opts) : '') + read(name + '.html'));
   if (/<\?/.test(html)) throw new Error('Unsupported template scriptlet left in Index.html');

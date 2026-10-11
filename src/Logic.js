@@ -370,9 +370,15 @@ function categoryStatus(spent, budget, fraction, closed, lumpSum) {
 function categoryBreakdown(expenses, month, budgets, today) {
   var totals = {};
   var counts = {};
-  inMonth(expenses, month).forEach(function (e) {
+  var items = {};
+  inMonth(expenses, month).slice().sort(function (a, b) {
+    return -compareExpenses(a, b);
+  }).forEach(function (e) {
     totals[e.category] = (totals[e.category] || 0) + e.amount;
     counts[e.category] = (counts[e.category] || 0) + 1;
+    (items[e.category] = items[e.category] || []).push({
+      row: e.row, date: e.date, note: e.note, account: e.account, amount: e.amount
+    });
   });
   Object.keys(budgets).forEach(function (k) {
     if (budgets[k] > 0 && !(k in totals)) totals[k] = 0;
@@ -387,6 +393,7 @@ function categoryBreakdown(expenses, month, budgets, today) {
       label: displayCategory(k),
       spent: spent,
       count: counts[k] || 0,
+      expenses: items[k] || [],
       budget: budget,
       pct: budget ? spent / budget : null,
       status: categoryStatus(spent, budget, fraction, closed, isLumpSum(k))

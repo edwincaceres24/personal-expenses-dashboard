@@ -109,6 +109,19 @@ describe('dashboard UI (local preview)', () => {
     expect([...$('weekly').querySelectorAll('.row-name')].map(text)).toEqual(['Food']);
   });
 
+  test('clicking a category lists its expenses for the month in a dialog', () => {
+    const { $, doc } = page;
+    const item = doc.querySelector('.cat-item');
+    const label = text(item.querySelector('.row-name'));
+    const count = Number(/(\d+) expenses?/.exec(text(item))[1]);
+    item.click();
+    expect($('category-dialog').open).toBe(true);
+    expect(text($('category-title'))).toContain(label);
+    expect($('category-body').querySelectorAll('tbody tr').length).toBe(count);
+    $('category-close').click();
+    expect($('category-dialog').open).toBe(false);
+  });
+
   test('rejects an invalid cap percentage', () => {
     const { $, dom } = page;
     $('settings-btn').click();
