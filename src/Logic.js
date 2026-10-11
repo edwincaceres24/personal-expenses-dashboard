@@ -599,6 +599,13 @@ function buildDashboard(data, opts) {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
+    KNOWN_ACCOUNTS: KNOWN_ACCOUNTS,
+    pad2: pad2,
+    isoToUTC: isoToUTC,
+    monthOf: monthOf,
+    sum: sum,
+    inRange: inRange,
+    isLumpSum: isLumpSum,
     CATEGORY_LABELS: CATEGORY_LABELS,
     KNOWN_CATEGORIES: KNOWN_CATEGORIES,
     DEFAULT_SETTINGS: DEFAULT_SETTINGS,
