@@ -47,9 +47,19 @@ function sendWeeklySummary_(force) {
 /** Recommendations from Claude, or null on any failure (the summary is never blocked). */
 function fetchRecommendations_(report) {
   try {
-    const res = askClaude({ system: SUMMARY_SYSTEM_PROMPT, user: buildClaudePrompt(report), maxTokens: 400 });
+    // Thinking counts toward max_tokens, so leave room beyond the short answer.
+    const res = askClaude({
+      system: SUMMARY_SYSTEM_PROMPT,
+      user: buildClaudePrompt(report),
+      maxTokens: 2000,
+      effort: 'low',
+      schema: RECOMMENDATIONS_SCHEMA
+    });
     const recommendations = validateRecommendations(res.text);
-    if (!recommendations) console.error('Claude returned invalid recommendations: ' + String(res.text).slice(0, 200));
+    if (!recommendations) {
+      console.error('Claude returned invalid recommendations (stop_reason=' + res.stopReason + '): ' +
+        String(res.text).slice(0, 200));
+    }
     return recommendations;
   } catch (e) {
     console.error('Claude call failed: ' + (e && e.message ? e.message : e));

@@ -164,6 +164,24 @@ describe('askClaude', () => {
     expect(req.muteHttpExceptions).toBe(true);
     expect(JSON.parse(req.payload)).toEqual({ model: 'claude-haiku-5-5', max_tokens: 100, system: 'SYS', messages: [{ role: 'user', content: 'hi' }] });
   });
+  test('effort and schema go into output_config', () => {
+    const schema = { type: 'object' };
+    askClaude({ system: 's', user: 'u', effort: 'low', schema: schema });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].payload).output_config)
+      .toEqual({ effort: 'low', format: { type: 'json_schema', schema: schema } });
+  });
+  test('reads text blocks after a thinking block', () => {
+    fetchMock.mockImplementationOnce(() => ({
+      getResponseCode: () => 200,
+      getContentText: () => JSON.stringify({
+        stop_reason: 'end_turn', usage: {},
+        content: [{ type: 'thinking', thinking: '', signature: 'x' }, { type: 'text', text: goodJson }]
+      })
+    }));
+    const res = askClaude({ system: 's', user: 'u' });
+    expect(res.text).toBe(goodJson);
+    expect(res.stopReason).toBe('end_turn');
+  });
   test('ANTHROPIC_WORKSPACE_ID adds the anthropic-workspace-id header', () => {
     props.ANTHROPIC_WORKSPACE_ID = 'wrkspc_test';
     askClaude({ system: 's', user: 'u' });

@@ -17,6 +17,14 @@ var SUMMARY_SYSTEM_PROMPT =
   'sentence, max 25 words, referencing a concrete category or amount. ' +
   'Be direct; no generic advice, no greetings, no disclaimers.';
 
+/** JSON Schema for Claude's answer (output_config.format). Count is checked by validateRecommendations. */
+var RECOMMENDATIONS_SCHEMA = {
+  type: 'object',
+  properties: { recommendations: { type: 'array', items: { type: 'string' } } },
+  required: ['recommendations'],
+  additionalProperties: false
+};
+
 var SUMMARY_WARNING_PCT = 0.8;
 var SUMMARY_TOP_N = 5;
 var SUMMARY_NOTE_MAX = 40;
@@ -380,6 +388,7 @@ function renderErrorEmail(message, dashboardUrl) {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     SUMMARY_SYSTEM_PROMPT: SUMMARY_SYSTEM_PROMPT,
+    RECOMMENDATIONS_SCHEMA: RECOMMENDATIONS_SCHEMA,
     isoWeekKey: isoWeekKey,
     previousWeek: previousWeek,
     formatWeekLabel: formatWeekLabel,
