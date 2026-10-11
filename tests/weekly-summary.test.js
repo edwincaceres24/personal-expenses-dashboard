@@ -164,6 +164,11 @@ describe('askClaude', () => {
     expect(req.muteHttpExceptions).toBe(true);
     expect(JSON.parse(req.payload)).toEqual({ model: 'claude-haiku-5-5', max_tokens: 100, system: 'SYS', messages: [{ role: 'user', content: 'hi' }] });
   });
+  test('ANTHROPIC_WORKSPACE_ID adds the anthropic-workspace-id header', () => {
+    props.ANTHROPIC_WORKSPACE_ID = 'wrkspc_test';
+    askClaude({ system: 's', user: 'u' });
+    expect(fetchMock.mock.calls[0][1].headers['anthropic-workspace-id']).toBe('wrkspc_test');
+  });
   test('CLAUDE_MODEL overrides the default', () => {
     props.CLAUDE_MODEL = 'claude-sonnet-5-5';
     askClaude({ system: 's', user: 'u' });

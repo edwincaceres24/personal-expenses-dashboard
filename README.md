@@ -188,6 +188,7 @@ projection of the second. It never writes to the spreadsheet.
 | `ALERT_EMAIL` | no | Recipient. Defaults to the script owner's email. |
 | `DASHBOARD_URL` | no | Your web app `/exec` URL, used for the link in the email. |
 | `CLAUDE_MODEL` | no | Defaults to `claude-haiku-5-5`. |
+| `ANTHROPIC_WORKSPACE_ID` | only for keys not scoped to a workspace | Sent as the `anthropic-workspace-id` header. Not needed if the key was created inside a workspace. |
 
 1. Push the code (`npm run push`).
 2. In the editor, select `setupWeeklySummary` and click **Run**. Google asks you to

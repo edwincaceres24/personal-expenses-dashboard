@@ -1,6 +1,7 @@
 /**
  * Claude API helper (Messages API over UrlFetchApp).
- * Script Properties: ANTHROPIC_API_KEY (required), CLAUDE_MODEL (optional).
+ * Script Properties: ANTHROPIC_API_KEY (required), CLAUDE_MODEL (optional),
+ * ANTHROPIC_WORKSPACE_ID (only for keys not scoped to a workspace).
  * Never logs the API key or the prompt; logs token usage only.
  */
 
@@ -9,6 +10,7 @@ var CLAUDE_API_VERSION = '2023-06-01';
 var CLAUDE_DEFAULT_MODEL = 'claude-haiku-5-5';
 var CLAUDE_KEY_PROPERTY = 'ANTHROPIC_API_KEY';
 var CLAUDE_MODEL_PROPERTY = 'CLAUDE_MODEL';
+var CLAUDE_WORKSPACE_PROPERTY = 'ANTHROPIC_WORKSPACE_ID';
 var CLAUDE_RETRY_DELAY_MS = 2000;
 
 /**
@@ -21,10 +23,13 @@ function askClaude(opts) {
   const key = String(props.getProperty(CLAUDE_KEY_PROPERTY) || '').trim();
   if (!key) throw new Error('Script property ' + CLAUDE_KEY_PROPERTY + ' is not set.');
   const model = String(props.getProperty(CLAUDE_MODEL_PROPERTY) || '').trim() || CLAUDE_DEFAULT_MODEL;
+  const workspaceId = String(props.getProperty(CLAUDE_WORKSPACE_PROPERTY) || '').trim();
+  const headers = { 'x-api-key': key, 'anthropic-version': CLAUDE_API_VERSION };
+  if (workspaceId) headers['anthropic-workspace-id'] = workspaceId;
   const request = {
     method: 'post',
     contentType: 'application/json',
-    headers: { 'x-api-key': key, 'anthropic-version': CLAUDE_API_VERSION },
+    headers: headers,
     muteHttpExceptions: true,
     payload: JSON.stringify({
       model: model,
@@ -43,7 +48,7 @@ function askClaude(opts) {
   }
   const body = res.getContentText();
   if (code < 200 || code >= 300) {
-    throw new Error('Claude API HTTP ' + code + ': ' + String(body).slice(0, 200));
+    throw new Error('Claude API HTTP ' + code + ': ' + String(body).slice(0, 500));
   }
   let data;
   try {
