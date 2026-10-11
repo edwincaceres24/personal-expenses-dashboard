@@ -5,14 +5,21 @@
   "description": "Personal expense dashboard (Google Apps Script web app) backed by a Google Sheet.",
   "scripts": {
     "test": "jest",
-    "push": "clasp push --force",
+    "test:watch": "jest --watch",
+    "preview": "node dev/preview.js",
+    "push": "npm test && clasp push --force",
+    "push:watch": "clasp push --watch --force",
     "deploy": "npm test && clasp push --force && node scripts/deploy.js"
   },
   "devDependencies": {
     "@google/clasp": "^3.4.1",
-    "jest": "^30.5.2"
+    "jest": "^30.5.2",
+    "jsdom": "^26.1.0"
   },
   "jest": {
     "testEnvironment": "node"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

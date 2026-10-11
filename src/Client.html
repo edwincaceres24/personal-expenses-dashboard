@@ -1,15 +1,15 @@
 <script>
-(function () {
-  'use strict';
+'use strict';
+{
 
-  var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  var STATUS = {
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const STATUS = {
     'on-track': { cls: 'chip-good', ico: '✓', label: 'On track' },
     'ahead': { cls: 'chip-warning', ico: '▲', label: 'Ahead of pace' },
     'over': { cls: 'chip-critical', ico: '✕', label: 'Over budget' },
     'no-budget': { cls: 'chip-none', ico: '–', label: 'No budget' }
   };
-  var ERROR_TITLES = {
+  const ERROR_TITLES = {
     SHEET_ID_MISSING: 'Spreadsheet not configured',
     SHEET_NOT_FOUND: 'Spreadsheet not found',
     NO_PERMISSION: 'No permission',
@@ -21,8 +21,8 @@
     UNEXPECTED: 'Something went wrong'
   };
 
-  var state = { data: null, month: '', week: 'thisWeek', loading: false };
-  var $ = function (id) { return document.getElementById(id); };
+  const state = { data: null, month: '', week: 'thisWeek', loading: false, reloadQueued: false };
+  const $ = id => { return document.getElementById(id); };
 
   // ---------------------------------------------------------------- helpers
   function esc(s) {
@@ -32,9 +32,9 @@
   }
   function pen(n, decimals) {
     decimals = decimals || 0;
-    var v = Number(n) || 0;
-    var fixed = Math.abs(v).toFixed(decimals);
-    var parts = fixed.split('.');
+    const v = Number(n) || 0;
+    const fixed = Math.abs(v).toFixed(decimals);
+    const parts = fixed.split('.');
     parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
     return (v < 0 && Number(fixed) !== 0 ? '-' : '') + 'S/ ' + parts.join('.');
   }
@@ -45,43 +45,52 @@
   function shortDate(iso) { return MONTHS[+iso.slice(5, 7) - 1] + ' ' + (+iso.slice(8, 10)); }
   function monthLabel(m) { return MONTHS[+m.slice(5, 7) - 1] + ' ' + m.slice(0, 4); }
   function pct(x) { return Math.max(0, Math.min(100, x * 100)); }
-  function chip(status) {
-    var s = STATUS[status];
-    return '<span class="chip ' + s.cls + '"><span class="ico" aria-hidden="true">' + s.ico + '</span>' + s.label + '</span>';
+  function chip(status, label) {
+    const s = STATUS[status];
+    return '<span class="chip ' + s.cls + '"><span class="ico" aria-hidden="true">' + s.ico + '</span>' + (label || s.label) + '</span>';
   }
 
   // ---------------------------------------------------------------- server
   function call(fn, args, onOk, onErr) {
-    var runner = google.script.run
-      .withSuccessHandler(function (res) {
+    const runner = google.script.run
+      .withSuccessHandler(res => {
         if (res && res.ok) onOk(res.data);
         else onErr((res && res.error) || { code: 'UNEXPECTED', message: 'Empty response from server.' });
       })
-      .withFailureHandler(function (err) {
+      .withFailureHandler(err => {
         onErr({ code: 'NETWORK', message: (err && err.message) || String(err) });
       });
     runner[fn].apply(runner, args);
   }
 
   function load(forceRefresh) {
-    if (state.loading) return;
+    if (state.loading) { state.reloadQueued = true; return; }
     state.loading = true;
     setBusy(true);
     $('status').textContent = forceRefresh ? 'Refreshing data from the sheet…' : 'Loading…';
-    call('getDashboard', [state.month, !!forceRefresh], function (data) {
+    call('getDashboard', [state.month, !!forceRefresh], data => {
       state.loading = false;
       setBusy(false);
       state.data = data;
-      state.month = data.month;
+      if (!state.reloadQueued) state.month = data.month;
       $('status').textContent = '';
       $('error').hidden = true;
       render();
-    }, function (err) {
+      runQueuedReload();
+    }, err => {
       state.loading = false;
       setBusy(false);
       $('status').textContent = '';
       showError(err);
+      runQueuedReload();
     });
+  }
+
+  /** Replays a load requested (e.g. a month picked on the chart) while one was in flight. */
+  function runQueuedReload() {
+    if (!state.reloadQueued) return;
+    state.reloadQueued = false;
+    load(false);
   }
 
   function setBusy(busy) {
@@ -91,22 +100,22 @@
   }
 
   function showError(err) {
-    var box = $('error');
-    var title = ERROR_TITLES[err.code] || ERROR_TITLES.UNEXPECTED;
-    var help = '';
+    const box = $('error');
+    const title = ERROR_TITLES[err.code] || ERROR_TITLES.UNEXPECTED;
+    let help = '';
     if (err.code === 'SHEET_ID_MISSING') {
       help = '<p>Set it in the Apps Script editor: <strong>Project Settings → Script Properties</strong>, key <code>SHEET_ID</code>.</p>';
     }
     box.innerHTML = '<h2>' + esc(title) + '</h2><p>' + esc(err.message) + '</p>' + help +
       '<p><button type="button" class="btn" id="retry-btn">Try again</button></p>';
     box.hidden = false;
-    $('retry-btn').addEventListener('click', function () { load(true); });
+    $('retry-btn').addEventListener('click', () => { load(true); });
     if (!state.data) $('dashboard').hidden = true;
   }
 
   // ---------------------------------------------------------------- render
   function render() {
-    var d = state.data;
+    const d = state.data;
     renderMonthSelect(d);
     renderPace(d.summary);
     renderWeekly();
@@ -114,25 +123,25 @@
     renderTrend(d.trend, d.summary.cap, d.month);
     renderQuality(d.quality);
     renderTransactions(d.transactions);
-    var t = new Date(d.loadedAt);
+    const t = new Date(d.loadedAt);
     $('footer').textContent = 'Data loaded ' + t.toLocaleString('en-US', { timeZone: 'America/Lima', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) +
       (d.fromCache ? ' (cached, refreshes every 5 min)' : ' (fresh)') + ' · Income ' + pen(d.summary.income) + ' · All amounts in PEN';
     $('dashboard').hidden = false;
   }
 
   function renderMonthSelect(d) {
-    var sel = $('month-select');
-    sel.innerHTML = d.months.map(function (m) {
+    const sel = $('month-select');
+    sel.innerHTML = d.months.map(m => {
       return '<option value="' + esc(m.value) + '"' + (m.value === d.month ? ' selected' : '') + '>' + esc(m.label) + '</option>';
     }).join('');
     sel.disabled = false;
   }
 
   function renderPace(s) {
-    var badge = $('pace-badge');
-    var html = '';
-    var cap = s.cap || 0;
-    var kpis = [
+    const badge = $('pace-badge');
+    let html = '';
+    const cap = s.cap || 0;
+    const kpis = [
       { label: s.closed ? 'Final total' : 'Spent so far', value: pen(s.spent), big: true },
       { label: 'Monthly cap (' + s.capPct + '% of income)', value: pen(cap) }
     ];
@@ -142,7 +151,7 @@
     } else if (s.closed) {
       kpis.push({ label: s.remaining >= 0 ? 'Under cap by' : 'Over cap by', value: pen(Math.abs(s.remaining)) });
     }
-    html += '<div class="kpis">' + kpis.map(function (k) {
+    html += '<div class="kpis">' + kpis.map(k => {
       return '<div><div class="kpi-label">' + esc(k.label) + '</div><div class="kpi-value' + (k.big ? '' : ' sm') + '">' + esc(k.value) + '</div></div>';
     }).join('') + '</div>';
 
@@ -152,13 +161,14 @@
       return;
     }
 
-    var reference = s.state === 'current' ? s.projected : s.spent;
-    badge.innerHTML = s.overCap ? chip('over').replace('Over budget', s.closed ? 'Over cap' : 'Projected over cap')
-      : chip('on-track').replace('On track', s.closed ? 'Within cap' : 'On track for cap');
+    const reference = s.state === 'current' ? s.projected : s.spent;
+    badge.innerHTML = s.overCap
+      ? chip('over', s.closed ? 'Over cap' : 'Projected over cap')
+      : chip('on-track', s.closed ? 'Within cap' : 'On track for cap');
 
-    var max = Math.max(cap, s.spent, reference || 0) * 1.08 || 1;
-    var spentW = pct(s.spent / max);
-    var meter = '<div class="meter" role="img" aria-label="' + esc(
+    const max = Math.max(cap, s.spent, reference || 0) * 1.08 || 1;
+    const spentW = pct(s.spent / max);
+    let meter = '<div class="meter" role="img" aria-label="' + esc(
       'Spent ' + pen(s.spent) + ' of ' + pen(cap) + ' cap' +
       (s.state === 'current' ? ', day ' + s.daysElapsed + ' of ' + s.daysInMonth + ', projected ' + pen(s.projected) : '')) + '">';
     if (s.state === 'current' && s.projected > s.spent) {
@@ -166,17 +176,17 @@
     }
     meter += '<div class="meter-fill' + (s.spent > cap ? ' over' : '') + '" style="width:' + spentW + '%"></div>';
     if (cap) {
-      var capX = pct(cap / max);
+      const capX = pct(cap / max);
       meter += '<div class="meter-mark" style="left:' + capX + '%"></div>' +
         '<div class="meter-mark-label top" data-x="' + capX + '" style="left:' + capX + '%">Cap ' + esc(pen(cap)) + '</div>';
       if (s.state === 'current') {
-        var dayX = pct(cap * s.dayFraction / max);
+        const dayX = pct(cap * s.dayFraction / max);
         meter += '<div class="meter-mark" style="left:' + dayX + '%;opacity:.55"></div>' +
           '<div class="meter-mark-label bottom" data-x="' + dayX + '" style="left:' + dayX + '%">Day ' + s.daysElapsed + '/' + s.daysInMonth + ' · pace ' + esc(pen(cap * s.dayFraction)) + '</div>';
       }
     }
     meter += '</div>';
-    var legend = '<div class="legend"><span><span class="swatch" style="background:var(--series)"></span>Spent</span>';
+    let legend = '<div class="legend"><span><span class="swatch" style="background:var(--series)"></span>Spent</span>';
     if (s.state === 'current') {
       legend += '<span><span class="swatch" style="background:var(--series-soft)"></span>Projected (' + (s.lumpSum ? 'rent + ' : '') + 'spent ÷ ' + s.daysElapsed + ' days × ' + s.daysInMonth + ')</span>' +
         '<span><span class="swatch" style="background:var(--cap-line);opacity:.55;width:2px"></span>Today\'s pace on the cap</span>';
@@ -188,11 +198,11 @@
 
   /** Centers each marker label on its marker, clamped inside the meter's width. */
   function positionMeterLabels() {
-    document.querySelectorAll('#pace .meter').forEach(function (meter) {
-      var mw = meter.clientWidth;
-      meter.querySelectorAll('.meter-mark-label').forEach(function (label) {
-        var w = label.offsetWidth;
-        var center = mw * Number(label.getAttribute('data-x')) / 100;
+    document.querySelectorAll('#pace .meter').forEach(meter => {
+      const mw = meter.clientWidth;
+      meter.querySelectorAll('.meter-mark-label').forEach(label => {
+        const w = label.offsetWidth;
+        const center = mw * Number(label.getAttribute('data-x')) / 100;
         label.style.left = Math.max(0, Math.min(mw - w, center - w / 2)) + 'px';
         label.classList.add('placed');
       });
@@ -200,8 +210,8 @@
   }
 
   function renderWeekly() {
-    var w = state.data.weekly[state.week];
-    document.querySelectorAll('.seg').forEach(function (b) {
+    const w = state.data.weekly[state.week];
+    document.querySelectorAll('.seg').forEach(b => {
       b.setAttribute('aria-pressed', String(b.getAttribute('data-week') === state.week));
     });
     $('weekly-range').textContent = 'Mon ' + shortDate(w.start) + ' – Sun ' + shortDate(w.end) + ' · weekly limit = monthly budget × 12 ÷ 52';
@@ -209,8 +219,8 @@
       $('weekly').innerHTML = '<p class="muted">No watched categories. Choose some in Settings.</p>';
       return;
     }
-    $('weekly').innerHTML = '<ul class="rows">' + w.rows.map(function (r) {
-      var sub, status;
+    $('weekly').innerHTML = '<ul class="rows">' + w.rows.map(r => {
+      let sub, status;
       if (r.limit === null) {
         sub = pen(r.spent) + ' spent · no budget in sheet';
         status = chip('no-budget');
@@ -220,7 +230,7 @@
           ? '<span class="chip chip-critical"><span class="ico" aria-hidden="true">✕</span>' + esc(pen(-r.remaining)) + ' over</span>'
           : '<span class="chip chip-good"><span class="ico" aria-hidden="true">✓</span>' + esc(pen(r.remaining)) + ' left</span>';
       }
-      var bar = r.limit ? '<div class="bar" aria-hidden="true"><div class="bar-fill' + (r.over ? ' over' : '') + '" style="width:' + pct(r.spent / r.limit) + '%"></div></div>' : '';
+      const bar = r.limit ? '<div class="bar" aria-hidden="true"><div class="bar-fill' + (r.over ? ' over' : '') + '" style="width:' + pct(r.spent / r.limit) + '%"></div></div>' : '';
       return '<li><div class="row-top"><span class="row-name">' + esc(r.label) + '</span>' + status + '</div>' +
         '<div class="row-sub num">' + esc(sub) + '</div>' + bar + '</li>';
     }).join('') + '</ul>';
@@ -231,45 +241,61 @@
       $('categories').innerHTML = '<p class="muted">No expenses recorded this month.</p>';
       return;
     }
-    var showTick = s.state === 'current';
-    $('categories').innerHTML = '<ul class="rows cat-grid">' + rows.map(function (c) {
-      var sub = c.budget ? pen(c.spent) + ' of ' + pen(c.budget) + ' · ' + Math.round(c.pct * 100) + '%' : pen(c.spent);
+    const showTick = s.state === 'current';
+    $('categories').innerHTML = '<ul class="rows cat-grid">' + rows.map((c, i) => {
+      let sub = c.budget ? pen(c.spent) + ' of ' + pen(c.budget) + ' · ' + Math.round(c.pct * 100) + '%' : pen(c.spent);
       if (c.count) sub += ' · ' + c.count + (c.count === 1 ? ' expense' : ' expenses');
-      var bar = c.budget
+      const bar = c.budget
         ? '<div class="bar" aria-hidden="true"><div class="bar-fill' + (c.status === 'over' ? ' over' : '') + '" style="width:' + pct(c.pct) + '%"></div>' +
           (showTick ? '<div class="bar-tick" style="left:' + pct(s.dayFraction) + '%"></div>' : '') + '</div>'
         : '';
-      return '<li><div class="row-top"><span class="row-name">' + esc(c.label) + '</span>' + chip(c.status) + '</div>' +
+      return '<li class="cat-item" tabindex="0" role="button" data-idx="' + i + '" aria-haspopup="dialog" aria-label="' +
+        esc(c.label + ': show expenses') + '"><div class="row-top"><span class="row-name">' + esc(c.label) + '</span>' + chip(c.status) + '</div>' +
         '<div class="row-sub num">' + esc(sub) + '</div>' + bar + '</li>';
     }).join('') + '</ul>' +
       (showTick ? '<p class="muted small">The thin tick on each bar marks where spending would be at an even pace today.</p>' : '');
   }
 
+  function openCategory(c) {
+    $('category-title').textContent = c.label + ' · ' + state.data.monthLabel;
+    $('category-body').innerHTML = !c.expenses.length
+      ? '<p class="muted">No expenses in this category this month.</p>'
+      : '<div class="table-wrap"><table><thead><tr><th scope="col">Date</th><th scope="col">Note</th>' +
+        '<th scope="col">Account</th><th scope="col" class="amt">Amount</th></tr></thead><tbody>' +
+        c.expenses.map(t => {
+          return '<tr><td class="num">' + esc(shortDate(t.date)) + '</td><td class="note">' +
+            (t.note ? esc(t.note) : '<span class="empty-note">no note</span>') + '</td><td>' +
+            esc(t.account) + '</td><td class="amt num">' + esc(pen(t.amount, 2)) + '</td></tr>';
+        }).join('') + '</tbody></table></div>' +
+        '<p class="muted small num">' + c.count + (c.count === 1 ? ' expense' : ' expenses') + ' · total ' + esc(pen(c.spent, 2)) + '</p>';
+    $('category-dialog').showModal();
+  }
+
   function renderTrend(points, cap, selected) {
-    var W = 480, H = 230, m = { t: 22, r: 12, b: 28, l: 52 };
-    var iw = W - m.l - m.r, ih = H - m.t - m.b;
-    var maxV = Math.max(cap || 0, Math.max.apply(null, points.map(function (p) { return p.total; }))) * 1.1 || 100;
-    var step = niceStep(maxV / 4);
+    const W = 480, H = 230, m = { t: 22, r: 12, b: 28, l: 52 };
+    const iw = W - m.l - m.r, ih = H - m.t - m.b;
+    let maxV = Math.max(cap || 0, Math.max.apply(null, points.map(p => { return p.total; }))) * 1.1 || 100;
+    const step = niceStep(maxV / 4);
     maxV = Math.ceil(maxV / step) * step;
-    var y = function (v) { return m.t + ih - (v / maxV) * ih; };
-    var band = iw / points.length;
-    var bw = Math.min(44, band * 0.62);
-    var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-labelledby="trend-title trend-desc">' +
+    const y = v => { return m.t + ih - (v / maxV) * ih; };
+    const band = iw / points.length;
+    const bw = Math.min(44, band * 0.62);
+    let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-labelledby="trend-title trend-desc">' +
       '<desc id="trend-desc">Monthly totals for the last six months with the cap of ' + esc(pen(cap)) + ' as a dashed reference line. Data table below.</desc>';
-    for (var v = 0; v <= maxV + 0.001; v += step) {
+    for (let v = 0; v <= maxV + 0.001; v += step) {
       svg += '<line class="grid-line" x1="' + m.l + '" x2="' + (W - m.r) + '" y1="' + y(v) + '" y2="' + y(v) + '"/>' +
         '<text class="axis-text" x="' + (m.l - 8) + '" y="' + (y(v) + 4) + '" text-anchor="end">' + esc(penShort(v)) + '</text>';
     }
-    points.forEach(function (p, i) {
-      var cx = m.l + band * i + band / 2;
-      var x = cx - bw / 2, top = y(p.total), h = Math.max(0, m.t + ih - top);
-      var over = cap && p.total > cap;
-      var r = Math.min(4, h, bw / 2);
-      var path = h > 0
+    points.forEach((p, i) => {
+      const cx = m.l + band * i + band / 2;
+      const x = cx - bw / 2, top = y(p.total), h = Math.max(0, m.t + ih - top);
+      const over = cap && p.total > cap;
+      const r = Math.min(4, h, bw / 2);
+      const path = h > 0
         ? 'M' + x + ',' + (m.t + ih) + 'V' + (top + r) + 'Q' + x + ',' + top + ' ' + (x + r) + ',' + top +
           'H' + (x + bw - r) + 'Q' + (x + bw) + ',' + top + ' ' + (x + bw) + ',' + (top + r) + 'V' + (m.t + ih) + 'Z'
         : '';
-      var tip = monthLabel(p.month) + ': ' + pen(p.total) + (cap ? (over ? ' · over cap by ' + pen(p.total - cap) : ' · ' + pen(cap - p.total) + ' under cap') : '');
+      const tip = monthLabel(p.month) + ': ' + pen(p.total) + (cap ? (over ? ' · over cap by ' + pen(p.total - cap) : ' · ' + pen(cap - p.total) + ' under cap') : '');
       svg += '<g>' +
         '<rect class="hit" x="' + (cx - band / 2) + '" y="' + m.t + '" width="' + band + '" height="' + ih + '" tabindex="0" role="button"' +
         ' data-month="' + esc(p.month) + '" data-tip="' + esc(tip) + '" aria-label="' + esc(tip + '. Select to view this month.') + '"/>' +
@@ -283,79 +309,79 @@
         '<text class="cap-text" x="' + (W - m.r) + '" y="' + (y(cap) - 6) + '" text-anchor="end">Cap ' + esc(penShort(cap)) + '</text>';
     }
     svg += '</svg>';
-    var table = '<details class="table-toggle"><summary>Show as table</summary><div class="table-wrap"><table><thead><tr><th scope="col">Month</th><th scope="col" class="amt">Total</th><th scope="col" class="amt">vs. cap</th></tr></thead><tbody>' +
-      points.map(function (p) {
+    const table = '<details class="table-toggle"><summary>Show as table</summary><div class="table-wrap"><table><thead><tr><th scope="col">Month</th><th scope="col" class="amt">Total</th><th scope="col" class="amt">vs. cap</th></tr></thead><tbody>' +
+      points.map(p => {
         return '<tr><td>' + esc(monthLabel(p.month)) + '</td><td class="amt num">' + esc(pen(p.total)) + '</td><td class="amt num">' +
           (cap ? esc((p.total > cap ? '+' : '') + pen(p.total - cap)) : '–') + '</td></tr>';
       }).join('') + '</tbody></table></div></details>';
     $('trend').innerHTML = svg + '<div class="legend"><span><span class="swatch" style="background:var(--series)"></span>Within cap</span>' +
       '<span><span class="swatch" style="background:var(--critical)"></span>Over cap</span><span>Select a bar to open that month</span></div>' + table;
 
-    $('trend').querySelectorAll('.hit').forEach(function (el) {
+    $('trend').querySelectorAll('.hit').forEach(el => {
       el.addEventListener('mouseenter', showTip);
       el.addEventListener('mousemove', showTip);
       el.addEventListener('mouseleave', hideTip);
       el.addEventListener('focus', showTip);
       el.addEventListener('blur', hideTip);
-      el.addEventListener('click', function () { selectMonth(el.getAttribute('data-month')); });
-      el.addEventListener('keydown', function (e) {
+      el.addEventListener('click', () => { selectMonth(el.getAttribute('data-month')); });
+      el.addEventListener('keydown', e => {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectMonth(el.getAttribute('data-month')); }
       });
     });
   }
 
   function niceStep(raw) {
-    var p = Math.pow(10, Math.floor(Math.log10(raw || 1)));
-    var n = raw / p;
+    const p = Math.pow(10, Math.floor(Math.log10(raw || 1)));
+    const n = raw / p;
     return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p;
   }
 
   function showTip(e) {
-    var tip = $('tooltip');
-    var el = e.currentTarget;
+    const tip = $('tooltip');
+    const el = e.currentTarget;
     tip.textContent = el.getAttribute('data-tip');
     tip.hidden = false;
-    var x, y;
+    let x, y;
     if (e.type === 'focus') {
-      var r = el.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
       x = r.left + r.width / 2; y = r.top;
     } else {
       x = e.clientX; y = e.clientY;
     }
-    var w = tip.offsetWidth, h = tip.offsetHeight;
+    const w = tip.offsetWidth, h = tip.offsetHeight;
     tip.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, x - w / 2)) + 'px';
     tip.style.top = Math.max(8, y - h - 12) + 'px';
   }
   function hideTip() { $('tooltip').hidden = true; }
 
   function renderQuality(q) {
-    var items = [];
-    var rentMissing = q.missingRent.filter(function (r) { return r.status === 'missing'; });
-    var rentPending = q.missingRent.filter(function (r) { return r.status === 'pending'; });
+    const items = [];
+    const rentMissing = q.missingRent.filter(r => { return r.status === 'missing'; });
+    const rentPending = q.missingRent.filter(r => { return r.status === 'pending'; });
     items.push(dqItem('Rent not recorded (≥ S/ 1,000)',
       rentMissing.length ? statusText('critical', rentMissing.length + (rentMissing.length === 1 ? ' month' : ' months'))
         : statusText('good', 'None missing'),
-      (rentMissing.length ? '<ul class="items">' + rentMissing.map(function (r) { return '<li>' + esc(monthLabel(r.month)) + '</li>'; }).join('') + '</ul>' : '') +
+      (rentMissing.length ? '<ul class="items">' + rentMissing.map(r => { return '<li>' + esc(monthLabel(r.month)) + '</li>'; }).join('') + '</ul>' : '') +
       (rentPending.length ? '<p class="muted small">' + esc(monthLabel(rentPending[0].month)) + ': not recorded yet.</p>' : ''), true));
 
     items.push(dqItem('Invalid amounts (excluded from totals)',
       q.invalidAmounts.length ? statusText('critical', q.invalidAmounts.length + ' rows') : statusText('good', 'None'),
-      q.invalidAmounts.length ? '<details><summary>Show rows</summary><ul class="items">' + q.invalidAmounts.map(function (r) {
-        return '<li>Row ' + r.row + ': “' + esc(r.rawAmount) + '”' + (r.category ? ' · ' + esc(r.category) : '') +
+      q.invalidAmounts.length ? '<details><summary>Show rows</summary><ul class="items">' + q.invalidAmounts.map(r => {
+        return '<li>Row ' + r.row + ': “' + esc(r.rawAmount) + '”' + (r.label ? ' · ' + esc(r.label) : '') +
           (r.date ? ' · ' + esc(shortDate(r.date)) : '') + ' — ' + esc(r.reason) + '</li>';
       }).join('') + '</ul></details>' : ''));
 
-    var v = q.vagueNotes;
+    const v = q.vagueNotes;
     items.push(dqItem('Vague or empty notes (this month)',
       v.count ? statusText('warning', v.count + ' · ' + pen(v.total)) : statusText('good', 'None'),
-      v.count ? '<details><summary>Show expenses</summary><ul class="items">' + v.items.map(function (r) {
+      v.count ? '<details><summary>Show expenses</summary><ul class="items">' + v.items.map(r => {
         return '<li>' + esc(shortDate(r.date)) + ' · ' + esc(r.label) + ' · ' + esc(pen(r.amount, 2)) + ' · ' +
           (r.note ? '“' + esc(r.note) + '”' : '<span class="empty-note">empty</span>') + ' (row ' + r.row + ')</li>';
       }).join('') + '</ul></details>' : ''));
 
     items.push(dqItem('Spending without a budget (this month)',
       q.unbudgeted.length ? statusText('warning', q.unbudgeted.length + (q.unbudgeted.length === 1 ? ' category' : ' categories')) : statusText('good', 'None'),
-      q.unbudgeted.length ? '<ul class="items">' + q.unbudgeted.map(function (c) {
+      q.unbudgeted.length ? '<ul class="items">' + q.unbudgeted.map(c => {
         return '<li>' + esc(c.label) + ' · ' + esc(pen(c.spent)) + '</li>';
       }).join('') + '</ul>' : ''));
 
@@ -363,7 +389,7 @@
   }
 
   function statusText(kind, text) {
-    var map = { good: ['chip-good', '✓'], warning: ['chip-warning', '!'], critical: ['chip-critical', '✕'] };
+    const map = { good: ['chip-good', '✓'], warning: ['chip-warning', '!'], critical: ['chip-critical', '✕'] };
     return '<span class="chip ' + map[kind][0] + '"><span class="ico" aria-hidden="true">' + map[kind][1] + '</span>' + esc(text) + '</span>';
   }
   function dqItem(title, status, body) {
@@ -377,7 +403,7 @@
     }
     $('transactions').innerHTML = '<table><thead><tr><th scope="col">Date</th><th scope="col">Note</th><th scope="col">Category</th>' +
       '<th scope="col">Account</th><th scope="col" class="amt">Amount</th></tr></thead><tbody>' +
-      rows.map(function (t) {
+      rows.map(t => {
         return '<tr><td class="num">' + esc(shortDate(t.date)) + '</td><td class="note">' +
           (t.note ? esc(t.note) : '<span class="empty-note">no note</span>') + '</td><td>' + esc(t.label) + '</td><td>' +
           esc(t.account) + '</td><td class="amt num">' + esc(pen(t.amount, 2)) + '</td></tr>';
@@ -387,9 +413,9 @@
   // ---------------------------------------------------------------- settings
   function openSettings() {
     if (!state.data) return;
-    var s = state.data.settings;
-    $('watched-list').innerHTML = state.data.categories.map(function (c, i) {
-      var id = 'w-' + i;
+    const s = state.data.settings;
+    $('watched-list').innerHTML = state.data.categories.map((c, i) => {
+      const id = 'w-' + i;
       return '<label for="' + id + '"><input type="checkbox" id="' + id + '" value="' + esc(c.key) + '"' +
         (s.watched.indexOf(c.key) >= 0 ? ' checked' : '') + '>' + esc(c.label) + '</label>';
     }).join('');
@@ -400,21 +426,21 @@
 
   function saveSettingsFromForm(e) {
     e.preventDefault();
-    var cap = Number($('cap-input').value);
+    const cap = Number($('cap-input').value);
     if (!(cap > 0 && cap <= 100)) {
       $('settings-error').textContent = 'Cap percentage must be between 1 and 100.';
       $('settings-error').hidden = false;
       $('cap-input').focus();
       return;
     }
-    var watched = Array.prototype.map.call(
-      $('watched-list').querySelectorAll('input:checked'), function (i) { return i.value; });
+    const watched = Array.prototype.map.call(
+      $('watched-list').querySelectorAll('input:checked'), i => { return i.value; });
     $('settings-save').disabled = true;
-    call('saveSettings', [{ watched: watched, capPct: cap }], function () {
+    call('saveSettings', [{ watched: watched, capPct: cap }], () => {
       $('settings-save').disabled = false;
       $('settings-dialog').close();
       load(false);
-    }, function (err) {
+    }, err => {
       $('settings-save').disabled = false;
       $('settings-error').textContent = 'Could not save settings: ' + err.message;
       $('settings-error').hidden = false;
@@ -428,24 +454,42 @@
     load(false);
   }
 
-  $('month-select').addEventListener('change', function (e) { selectMonth(e.target.value); });
-  $('refresh-btn').addEventListener('click', function () { load(true); });
+  $('month-select').addEventListener('change', e => { selectMonth(e.target.value); });
+  $('refresh-btn').addEventListener('click', () => { load(true); });
   $('settings-btn').addEventListener('click', openSettings);
-  $('settings-cancel').addEventListener('click', function () { $('settings-dialog').close(); });
+  $('categories').addEventListener('click', e => {
+    const li = e.target.closest('.cat-item');
+    if (li && state.data) openCategory(state.data.breakdown[Number(li.getAttribute('data-idx'))]);
+  });
+  $('categories').addEventListener('keydown', e => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const li = e.target.closest('.cat-item');
+    if (!li || !state.data) return;
+    e.preventDefault();
+    openCategory(state.data.breakdown[Number(li.getAttribute('data-idx'))]);
+  });
+  $('category-close').addEventListener('click', () => { $('category-dialog').close(); });
+  $('category-dialog').addEventListener('click', function (e) {
+    if (e.target !== this) return;
+    const r = this.getBoundingClientRect();
+    const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+    if (!inside) this.close();
+  });
+  $('settings-cancel').addEventListener('click', () => { $('settings-dialog').close(); });
   $('settings-form').addEventListener('submit', saveSettingsFromForm);
-  document.querySelectorAll('.seg').forEach(function (b) {
-    b.addEventListener('click', function () {
+  document.querySelectorAll('.seg').forEach(b => {
+    b.addEventListener('click', () => {
       state.week = b.getAttribute('data-week');
       if (state.data) renderWeekly();
     });
   });
 
-  var resizeFrame = 0;
-  window.addEventListener('resize', function () {
+  let resizeFrame = 0;
+  window.addEventListener('resize', () => {
     cancelAnimationFrame(resizeFrame);
     resizeFrame = requestAnimationFrame(positionMeterLabels);
   });
 
   load(false);
-})();
+}
 </script>

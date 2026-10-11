@@ -221,6 +221,10 @@
   .check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px 12px; }
   .check-grid label { display: flex; gap: 6px; align-items: center; min-height: 28px; }
   .check-grid input { width: 18px; height: 18px; accent-color: var(--accent); }
+  .cat-item { cursor: pointer; }
+  .cat-item:hover .row-name { text-decoration: underline; }
+  #category-dialog { width: min(640px, calc(100vw - 32px)); }
+  #category-body { overflow-y: auto; max-height: calc(100vh - 200px); margin-top: 12px; }
   .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 
   @media (prefers-reduced-motion: no-preference) {

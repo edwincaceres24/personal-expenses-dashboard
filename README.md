@@ -29,8 +29,15 @@ src/
   Index.html        Layout
   Styles.html       CSS (light/dark via prefers-color-scheme)
   Client.html       Client-side JS (vanilla, inline SVG chart)
-tests/logic.test.js Jest tests for Logic.js
+tests/
+  logic.test.js     Unit tests for Logic.js
+  ui.test.js        UI smoke tests (real HTML/JS in jsdom, fake data)
+dev/
+  fixtures.js       Fake spreadsheet data with the known quirks (never real data)
+  build-preview.js  Builds a standalone page from src/ with google.script.run stubbed
+  preview.js        Local preview server (npm run preview)
 scripts/deploy.js   Helper used by `npm run deploy`
+.github/workflows/  CI: runs the tests on every push and pull request
 ```
 
 ## How the sheet is read
@@ -72,7 +79,7 @@ How the data quirks are handled:
 - The Apps Script API turned on for that account at
   <https://script.google.com/home/usersettings>
 
-### 2. Install dependencies (clasp and jest)
+### 2. Install dependencies (clasp, jest, jsdom)
 
 ```bash
 git clone https://github.com/<your-user>/personal-tracker-expenses.git
@@ -125,8 +132,8 @@ The spreadsheet ID is **not** stored in the repo. Set it as a script property:
 ### 6. Push the code
 
 ```bash
-npm test     # run the unit tests
-npm run push # clasp push --force (uploads src/)
+npm test     # run the tests
+npm run push # runs the tests, then clasp push --force (uploads src/)
 ```
 
 ### 7. Deploy as a web app
@@ -167,15 +174,88 @@ To try changes without redeploying, use the `/dev` URL. You'll find it under
 - **Errors**: problems show a specific message instead of a blank page. Examples are
   SHEET_ID not set, tab not found, no permission, and income label not found.
 
-## Development
+## Development workflow
+
+Each step below gets closer to production. Do them in order, and only deploy when
+everything before it is green.
+
+| Step | Command | Data | Who sees it |
+|---|---|---|---|
+| 1. Unit and UI tests | `npm test` | fake | only you (local) |
+| 2. Local preview | `npm run preview` | fake | only you (local) |
+| 3. Test deployment | `npm run push`, then open the `/dev` URL | **real** | only you (latest pushed code) |
+| 4. Release | `npm run deploy` | real | your web app URL (`/exec`) |
+
+### 1. Tests
 
 ```bash
-npm test             # Jest unit tests for src/Logic.js
-npx clasp push --watch
+npm test             # unit tests (Logic.js) + UI smoke tests (jsdom)
+npm run test:watch   # re-run on save
 ```
 
+- **Logic changes**: write or adjust a test in `tests/logic.test.js` first, watch it
+  fail, then make it pass.
+- **UI changes**: `tests/ui.test.js` loads the real `Index`, `Styles` and `Client` HTML
+  in jsdom, with the server stubbed. jsdom has no layout engine, so check visual
+  changes in the preview.
+
+### 2. Local preview (no Apps Script, fake data)
+
+```bash
+npm run preview      # http://localhost:8080 — edit src/ and refresh
+```
+
+The page is built from `src/` on every request. `google.script.run` is replaced by a
+stub that runs the real `Logic.js` on the fake data in `dev/fixtures.js`. Settings
+are saved in the browser's localStorage. URL parameters:
+
+| Parameter | Example | Use |
+|---|---|---|
+| `today` | `?today=2026-10-01` | Test month starts and ends, week boundaries, day-1 labels |
+| `scenario` | `?scenario=empty`, `?scenario=error:NO_PERMISSION` | Empty and error states |
+| `delay` | `?delay=1500` | Loading states |
+
+To check the mobile layout, open DevTools and turn on device emulation (about 375px
+wide). To check dark mode, use DevTools' rendering options or switch your OS theme.
+
+### 3. Test with real data before releasing
+
+`npm run push` runs the tests, then uploads `src/` to Apps Script. Pushing **does
+not** change your web app URL. It only updates the **test deployment**, which always
+runs the latest pushed code:
+
+1. In the editor, go to **Deploy**, then **Test deployments**, and copy the URL that
+   ends in `/dev`. Bookmark it; it never changes.
+2. Open it and check your change against the real sheet. Use **Refresh data** to
+   skip the 5-minute cache.
+
+`npm run push:watch` re-pushes on every save. It's handy together with the `/dev` URL.
+
+### 4. Release
+
+```bash
+export DEPLOYMENT_ID=<your-deployment-id>   # `npx clasp list-deployments` shows it
+DEPLOY_DESC="Short description of the change" npm run deploy
+```
+
+This runs the tests, pushes, and points your web app at a new version, so the URL
+stays the same. To roll back, go to **Deploy**, then **Manage deployments**, then
+the pencil (edit), and pick an earlier version.
+
+### Git workflow
+
+1. Create a branch per change: `git checkout -b fix/short-name`.
+2. Make small commits in [Conventional Commits](https://www.conventionalcommits.org/)
+   format (`feat:`, `fix:`, `test:`, `docs:`, `chore:`).
+3. Push the branch and open a pull request. CI runs `npm test`.
+4. Merge to `main` when it's green and you've checked it on the `/dev` URL.
+5. Run `npm run deploy` from `main`.
+
+### Notes
+
 `Logic.js` uses no Apps Script globals and exports its functions with
-`module.exports` when running in Node, so the same file runs in both environments.
+`module.exports` when running in Node, so the same file runs in Apps Script, in Jest
+and in the local preview.
 
 ### Security
 

@@ -206,6 +206,11 @@ describe('categoryBreakdown', () => {
     const by = Object.fromEntries(b.map(c => [c.key, c.status]));
     expect(by).toEqual({ Food: 'over', Restaurant: 'on-track', Pets: 'no-budget', Health: 'on-track', Gift: 'on-track' });
   });
+  test('includes the month\'s expenses per category, newest first', () => {
+    const b = L.categoryBreakdown(expenses, '2026-09', budgets, '2026-09-15');
+    expect(b.find(c => c.key === 'Food').expenses.map(e => e.amount)).toEqual([500]);
+    expect(b.find(c => c.key === 'Gift').expenses).toEqual([]);
+  });
   test('ahead of pace when above prorated budget + tolerance', () => {
     const b = L.categoryBreakdown(expenses, '2026-09', budgets, '2026-09-03');
     expect(b.find(c => c.key === 'Restaurant').status).toBe('ahead');
@@ -311,7 +316,9 @@ describe('data quality', () => {
   });
   test('invalid amounts listed with row number', () => {
     expect(q.invalidAmounts).toHaveLength(1);
-    expect(q.invalidAmounts[0]).toMatchObject({ row: 8, rawAmount: 'Food' });
+    expect(q.invalidAmounts[0]).toMatchObject({ row: 8, rawAmount: 'Food', label: 'Food' });
+    const deuda = L.dataQuality(L.parseExpenses([HEADER, row('x', 'Deuda', 'Cash', '', '09-01-2026')]), {}, '2026-09', '2026-10-01');
+    expect(deuda.invalidAmounts[0].label).toBe('Debt');
   });
   test('vague notes count and total for selected month', () => {
     const sep = L.dataQuality(parsed, budgets, '2026-09', '2026-10-01', 6);
