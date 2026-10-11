@@ -26,11 +26,17 @@ src/
   appsscript.json   Manifest (V8, America/Lima, read-only Sheets scope, Sheets API service, web app config)
   Code.js           doGet, server endpoints, sheet access, cache
   Logic.js          Pure business logic (no Apps Script globals), unit tested with Jest
+  Summary.js        Pure logic + email HTML for the Monday weekly summary
+  WeeklySummary.js  Weekly summary agent: trigger, run-now, Claude call orchestration
+  Claude.js         Claude API helper (askClaude, via UrlFetchApp)
+  Notifier.js       Shared email helper (recipient, dashboard link)
   Index.html        Layout
   Styles.html       CSS (light/dark via prefers-color-scheme)
   Client.html       Client-side JS (vanilla, inline SVG chart)
 tests/
   logic.test.js     Unit tests for Logic.js
+  summary.test.js   Unit tests for Summary.js (weeks, report, payload, validation, email)
+  weekly-summary.test.js  Apps Script layer with mocked services (the real API is never called)
   ui.test.js        UI smoke tests (real HTML/JS in jsdom, fake data)
 dev/
   fixtures.js       Fake spreadsheet data with the known quirks (never real data)
@@ -164,6 +170,41 @@ pencil (edit), then **Version: New version**, then **Deploy**.
 
 To try changes without redeploying, use the `/dev` URL. You'll find it under
 **Deploy**, then **Test deployments**, and it always runs the latest pushed code.
+
+## Weekly summary (Monday email)
+
+Every Monday around 8:00 (America/Lima) the script emails the previous Monday–Sunday
+week: spending vs. the weekly limit for **all** categories (watched ones are marked ★,
+rent is excluded), the total against the week before, the top 5 expenses, the month
+closing/projection, a data-quality line, and 2–3 recommendations written by Claude.
+If the week crosses two months you get the closing result of the first and the
+projection of the second. It never writes to the spreadsheet.
+
+**Setup** (Apps Script editor, **Project Settings**, **Script Properties**):
+
+| Property | Required | Value |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | yes | Your Claude API key. Never commit it. |
+| `ALERT_EMAIL` | no | Recipient. Defaults to the script owner's email. |
+| `DASHBOARD_URL` | no | Your web app `/exec` URL, used for the link in the email. |
+| `CLAUDE_MODEL` | no | Defaults to `claude-haiku-5-5`. |
+
+1. Push the code (`npm run push`).
+2. In the editor, select `setupWeeklySummary` and click **Run**. Google asks you to
+   authorize the new scopes: send email (`script.send_mail`), call the Claude API
+   (`script.external_request`) and manage triggers (`script.scriptapp`). The sheet scope
+   stays read-only. The scopes are also listed in `appsscript.json`.
+3. Test it with `runWeeklySummaryNow` (sends immediately, ignores the once-per-week
+   check, and does not use up that week's slot).
+
+`removeWeeklySummary` deletes the trigger. Only one summary is sent per ISO week
+(`WEEKLY_SUMMARY_LAST` property, e.g. `summary:2026-W41`). If Claude fails, times out
+or returns invalid JSON, the email is still sent with "Recommendations unavailable this
+week". Token usage is logged to the execution log. Only aggregates and the top 5
+expenses (notes cut to 40 characters, account names removed) are sent to Claude. The
+system prompt is the `SUMMARY_SYSTEM_PROMPT` constant in `src/Summary.js`.
+
+Triggers run the **HEAD** code, so a `clasp push` changes the summary immediately.
 
 ## Usage notes
 
