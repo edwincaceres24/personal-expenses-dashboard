@@ -28,24 +28,24 @@ function stubScript(opts) {
   const fixtures = makeFixtures(opts.today);
   return `<script>
 ${read('Logic.js')}
-(function () {
-  var params = new URLSearchParams(location.search);
-  var TODAY = params.get('today') || ${JSON.stringify(opts.today)};
-  var SCENARIO = params.get('scenario') || ${JSON.stringify(opts.scenario || 'ok')};
-  var DELAY = Number(params.get('delay') || ${Number(opts.delay) || 0});
-  var FIXTURES = ${JSON.stringify(fixtures)};
-  var settings = null;
+{
+  const params = new URLSearchParams(location.search);
+  const TODAY = params.get('today') || ${JSON.stringify(opts.today)};
+  const SCENARIO = params.get('scenario') || ${JSON.stringify(opts.scenario || 'ok')};
+  const DELAY = Number(params.get('delay') || ${Number(opts.delay) || 0});
+  const FIXTURES = ${JSON.stringify(fixtures)};
+  let settings = null;
   try { settings = JSON.parse(localStorage.getItem('preview-settings')); } catch (e) {}
 
-  var endpoints = {
-    getDashboard: function (month, forceRefresh) {
+  const endpoints = {
+    getDashboard(month, forceRefresh) {
       if (SCENARIO.indexOf('error:') === 0) {
-        var code = SCENARIO.slice(6);
+        const code = SCENARIO.slice(6);
         return { ok: false, error: { code: code, message: 'Simulated ' + code + ' error (local preview).' } };
       }
-      var src = SCENARIO === 'empty' ? { expenses: [FIXTURES.expenses[0]], budgets: FIXTURES.budgets } : FIXTURES;
-      var parsed = parseExpenses(src.expenses);
-      var d = buildDashboard({
+      const src = SCENARIO === 'empty' ? { expenses: [FIXTURES.expenses[0]], budgets: FIXTURES.budgets } : FIXTURES;
+      const parsed = parseExpenses(src.expenses);
+      const d = buildDashboard({
         expenses: parsed.expenses, invalid: parsed.invalid,
         budgets: parseBudgets(src.budgets), income: findIncome(FIXTURES.framework)
       }, { month: month, today: TODAY, settings: settings });
@@ -53,7 +53,7 @@ ${read('Logic.js')}
       d.fromCache = !forceRefresh;
       return { ok: true, data: d };
     },
-    saveSettings: function (input) {
+    saveSettings(input) {
       settings = sanitizeSettings(input);
       try { localStorage.setItem('preview-settings', JSON.stringify(settings)); } catch (e) {}
       return { ok: true, data: settings };
@@ -61,17 +61,16 @@ ${read('Logic.js')}
   };
 
   function runner(onOk, onFail) {
-    var r = {
-      withSuccessHandler: function (f) { return runner(f, onFail); },
-      withFailureHandler: function (f) { return runner(onOk, f); }
+    const r = {
+      withSuccessHandler: f => runner(f, onFail),
+      withFailureHandler: f => runner(onOk, f)
     };
-    Object.keys(endpoints).forEach(function (name) {
-      r[name] = function () {
-        var args = Array.prototype.slice.call(arguments);
-        setTimeout(function () {
+    Object.keys(endpoints).forEach(name => {
+      r[name] = (...args) => {
+        setTimeout(() => {
           try {
             // Round-trip through JSON like google.script.run does.
-            var res = JSON.parse(JSON.stringify(endpoints[name].apply(null, args)));
+            const res = JSON.parse(JSON.stringify(endpoints[name].apply(null, args)));
             if (onOk) onOk(res);
           } catch (e) {
             if (onFail) onFail(e); else console.error(e);
@@ -82,7 +81,7 @@ ${read('Logic.js')}
     return r;
   }
   window.google = { script: { get run() { return runner(null, null); } } };
-})();
+}
 </script>`;
 }
 

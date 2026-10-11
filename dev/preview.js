@@ -10,6 +10,8 @@ const http = require('http');
 const { buildPreviewHtml } = require('./build-preview');
 
 const PORT = Number(process.env.PORT) || 8080;
+// Loopback only by default; set HOST=0.0.0.0 to open it to your LAN (e.g. to test on a phone).
+const HOST = process.env.HOST || '127.0.0.1';
 
 http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -24,7 +26,7 @@ http.createServer((req, res) => {
   } catch (e) {
     res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' }).end(String(e.stack || e));
   }
-}).listen(PORT, '127.0.0.1', () => {
-  console.log(`Preview with fake data: http://localhost:${PORT}`);
+}).listen(PORT, HOST, () => {
+  console.log(`Preview with fake data: http://${HOST === '0.0.0.0' ? '<this-pc-LAN-ip>' : 'localhost'}:${PORT}`);
   console.log('Edit files in src/ and refresh. Ctrl+C to stop.');
 });
